@@ -9,26 +9,30 @@ const io = new Server(server);
 // Serve static frontend files
 app.use(express.static('public'));
 
-// roomId -> Set<socket.id>
+// roomId -> Map<socket.id, username>
 const rooms = new Map();
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  socket.on('join-room', (roomId) => {
+  socket.on('join-room', ({ roomId, username }) => {
     socket.join(roomId);
     socket.data.roomId = roomId;
+    socket.data.username = username;
 
-    if (!rooms.has(roomId)) rooms.set(roomId, new Set());
+    if (!rooms.has(roomId)) rooms.set(roomId, new Map());
     const room = rooms.get(roomId);
 
     // Tell the newly joined peer who is already in the room
-    socket.emit('existing-peers', Array.from(room));
+    socket.emit(
+      'existing-peers',
+      Array.from(room, ([id, name]) => ({ id, username: name }))
+    );
 
-    room.add(socket.id);
+    room.set(socket.id, username);
 
     // Announce the new peer to everyone already in the room
-    socket.to(roomId).emit('viewer-joined', socket.id);
+    socket.to(roomId).emit('viewer-joined', { id: socket.id, username });
   });
 
   // Relay WebRTC offer/answer/ICE-candidate messages between two specific

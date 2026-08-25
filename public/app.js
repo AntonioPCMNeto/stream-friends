@@ -13,6 +13,13 @@ const iceServers = [
   { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 
+const lobby = document.getElementById('lobby');
+const appScreen = document.getElementById('appScreen');
+const usernameInput = document.getElementById('usernameInput');
+const roomCodeInput = document.getElementById('roomCodeInput');
+const lobbyError = document.getElementById('lobbyError');
+const enterBtn = document.getElementById('enterBtn');
+
 const videosContainer = document.getElementById('videos');
 const startBtn = document.getElementById('startShareBtn');
 const statusText = document.getElementById('status');
@@ -20,7 +27,11 @@ const roomLink = document.getElementById('roomLink');
 
 let localStream = null;
 let isSharing = false;
+let roomId = null;
+let myUsername = null;
+let hasEntered = false;
 const knownPeers = new Set(); // remote socket ids
+const peerUsernames = new Map(); // socket id -> username
 const peerConnections = new Map(); // socket id -> RTCPeerConnection
 const tiles = new Map(); // tile key ('local' or socket id) -> tile <div>
 
@@ -72,16 +83,39 @@ function removeTile(key) {
   }
 }
 
-// Room comes from the URL; generate and persist one if missing
-const url = new URL(window.location.href);
-let roomId = url.searchParams.get('room');
-if (!roomId) {
-  roomId = crypto.randomUUID().slice(0, 8);
+// Prefill the room code from a shared link, so a friend opening it only
+// has to type a name.
+const prefilledRoom = new URL(window.location.href).searchParams.get('room');
+if (prefilledRoom) roomCodeInput.value = prefilledRoom;
+
+function enterRoom() {
+  const username = usernameInput.value.trim();
+  if (!username) {
+    lobbyError.textContent = 'Please enter a name.';
+    return;
+  }
+
+  roomId = roomCodeInput.value.trim() || crypto.randomUUID().slice(0, 8);
+  myUsername = username;
+  hasEntered = true;
+
+  const url = new URL(window.location.href);
   url.searchParams.set('room', roomId);
   window.history.replaceState({}, '', url);
+  roomLink.href = url.href;
+  roomLink.textContent = url.href;
+
+  lobby.style.display = 'none';
+  appScreen.style.display = '';
+
+  if (socket.connected) {
+    socket.emit('join-room', { roomId, username: myUsername });
+  }
 }
-roomLink.href = url.href;
-roomLink.textContent = url.href;
+
+enterBtn.addEventListener('click', enterRoom);
+usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
+roomCodeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
 
 function getOrCreatePeerConnection(peerId) {
   let pc = peerConnections.get(peerId);
@@ -97,7 +131,8 @@ function getOrCreatePeerConnection(peerId) {
 
   // RECEIVER SIDE: a remote track means someone is sending us their screen
   pc.ontrack = (event) => {
-    addOrUpdateTile(peerId, event.streams[0], `Peer ${peerId.slice(0, 5)}`, false /* isLocal */);
+    const label = peerUsernames.get(peerId) || `Peer ${peerId.slice(0, 5)}`;
+    addOrUpdateTile(peerId, event.streams[0], label, false /* isLocal */);
     statusText.innerText = 'Viewing remote screen(s).';
 
     event.track.onended = () => removeTile(peerId);
@@ -128,23 +163,30 @@ async function callPeer(peerId) {
 
 socket.on('connect', () => {
   statusText.innerText = 'Connected. Share the room link to invite others.';
-  socket.emit('join-room', roomId);
+  if (hasEntered) {
+    socket.emit('join-room', { roomId, username: myUsername });
+  }
 });
 
 // Peers already in the room when we joined
-socket.on('existing-peers', (peerIds) => {
-  peerIds.forEach((id) => knownPeers.add(id));
-  if (isSharing) peerIds.forEach(callPeer);
+socket.on('existing-peers', (peers) => {
+  peers.forEach(({ id, username }) => {
+    knownPeers.add(id);
+    peerUsernames.set(id, username);
+  });
+  if (isSharing) peers.forEach(({ id }) => callPeer(id));
 });
 
 // A peer joined after us — call them if we're already sharing
-socket.on('viewer-joined', (peerId) => {
-  knownPeers.add(peerId);
-  if (isSharing) callPeer(peerId);
+socket.on('viewer-joined', ({ id, username }) => {
+  knownPeers.add(id);
+  peerUsernames.set(id, username);
+  if (isSharing) callPeer(id);
 });
 
 socket.on('peer-left', (peerId) => {
   knownPeers.delete(peerId);
+  peerUsernames.delete(peerId);
   closePeerConnection(peerId);
 });
 
@@ -178,7 +220,7 @@ startBtn.addEventListener('click', async () => {
 
     localStream = stream;
     isSharing = true;
-    addOrUpdateTile('local', stream, 'You (sharing)', true /* isLocal */);
+    addOrUpdateTile('local', stream, `You (${myUsername})`, true /* isLocal */);
     statusText.innerText = 'Sharing your screen...';
 
     // Call everyone already known in the room

@@ -44,17 +44,49 @@
       padding: 4px 10px;
       font-size: 13px;
     }
+
+    #lobby {
+      max-width: 320px;
+      margin: 60px auto;
+    }
+    #lobby input {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px;
+      margin: 10px 0;
+      font-size: 16px;
+      border-radius: 5px;
+      border: 1px solid #444;
+      background: #1e1e1e;
+      color: #fff;
+    }
+    #lobby .error {
+      color: #ff6b6b;
+      font-size: 13px;
+      min-height: 18px;
+    }
   </style>
 </head>
 <body>
   <h1>P2P Screen Sharing</h1>
-  <div>
-    <button id="startShareBtn">Start Sharing Screen</button>
-  </div>
-  <p id="status">Status: Initializing connection...</p>
-  <p>Room link: <a id="roomLink" href="#" target="_blank"></a></p>
 
-  <div id="videos" class="video-grid"></div>
+  <div id="lobby">
+    <input id="usernameInput" type="text" placeholder="Your name" maxlength="30">
+    <input id="roomCodeInput" type="text" placeholder="Room code (leave blank to create a new room)" maxlength="30">
+    <p id="lobbyError" class="error"></p>
+    <button id="enterBtn">Enter Room</button>
+  </div>
+
+  <div id="appScreen" style="display: none;">
+    <div>
+      <button id="startShareBtn">Start Sharing Screen</button>
+    </div>
+    <p id="status">Status: Initializing connection...</p>
+    <p>Room link: <a id="roomLink" href="#" target="_blank"></a></p>
+
+    <div id="videos" class="video-grid"></div>
+  </div>
 
   <!-- Include Socket.io via CDN; app.js does raw WebRTC signaling over it -->
   <script src="/socket.io/socket.io.js"></script>
