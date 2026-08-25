@@ -1,11 +1,12 @@
 import { state } from './state.js';
 import { addOrUpdateTile, removeTile } from './tiles.js';
-import { callPeer } from './peers.js';
+import { callPeer, updateBitrate } from './peers.js';
 
 const startBtn = document.getElementById('startShareBtn');
 const shareOptions = document.getElementById('shareOptions');
 const resolutionGroup = document.getElementById('resolutionGroup');
 const framerateGroup = document.getElementById('framerateGroup');
+const bitrateGroup = document.getElementById('bitrateGroup');
 const statusText = document.getElementById('status');
 
 // Wires a row of segmented buttons: clicking one marks it active and
@@ -29,7 +30,8 @@ function setSharingUI(sharing) {
 
 // Stops our outgoing tracks. This also ends the corresponding remote track
 // on every peer's connection, so their tile disappears without extra signaling.
-function stopSharing() {
+// Safe to call even when not currently sharing (e.g. on room exit).
+export function stopSharing() {
   if (state.localStream) {
     state.localStream.getTracks().forEach((track) => track.stop());
   }
@@ -85,6 +87,15 @@ async function startSharing() {
 export function initSharing() {
   initSegmented(resolutionGroup);
   initSegmented(framerateGroup);
+  initSegmented(bitrateGroup);
+
+  // Bitrate can change on the fly: push it to active senders immediately
+  // instead of waiting for the next share to pick it up.
+  bitrateGroup.addEventListener('click', (e) => {
+    if (e.target.tagName !== 'BUTTON') return;
+    state.videoBitrateKbps = Number(bitrateGroup.dataset.value) || null;
+    if (state.isSharing) updateBitrate();
+  });
 
   startBtn.addEventListener('click', () => {
     if (state.isSharing) {

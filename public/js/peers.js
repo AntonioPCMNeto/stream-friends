@@ -41,11 +41,37 @@ function closePeerConnection(peerId) {
   removeTile(peerId);
 }
 
+export function closeAllPeerConnections() {
+  Array.from(peerConnections.keys()).forEach(closePeerConnection);
+}
+
+// Caps a video sender's outgoing bitrate at state.videoBitrateKbps
+// (falsy = no cap, let the browser/network decide).
+function applyBitrateToSender(sender) {
+  const params = sender.getParameters();
+  if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+  params.encodings[0].maxBitrate = state.videoBitrateKbps ? state.videoBitrateKbps * 1000 : undefined;
+  sender.setParameters(params).catch((err) => console.error('Failed to set bitrate:', err));
+}
+
+// Re-applies the current bitrate setting to every active video sender —
+// used when the user changes the bitrate control while already sharing.
+export function updateBitrate() {
+  peerConnections.forEach((pc) => {
+    pc.getSenders().forEach((sender) => {
+      if (sender.track && sender.track.kind === 'video') applyBitrateToSender(sender);
+    });
+  });
+}
+
 // HOST SIDE: open a connection to a peer and offer our screen stream
 export async function callPeer(peerId) {
   if (!state.localStream) return;
   const pc = getOrCreatePeerConnection(peerId);
-  state.localStream.getTracks().forEach((track) => pc.addTrack(track, state.localStream));
+  state.localStream.getTracks().forEach((track) => {
+    const sender = pc.addTrack(track, state.localStream);
+    if (track.kind === 'video') applyBitrateToSender(sender);
+  });
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
   socket.emit('signal', { to: peerId, data: { type: 'offer', sdp: offer } });

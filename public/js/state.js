@@ -3,6 +3,7 @@
 export const state = {
   localStream: null,
   isSharing: false,
+  videoBitrateKbps: 2500, // null/0 = auto (browser default, no cap)
   roomId: null,
   myUsername: null,
   hasEntered: false,

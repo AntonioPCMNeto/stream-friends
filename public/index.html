@@ -46,6 +46,17 @@
               <button type="button" data-value="60">60</button>
             </div>
           </div>
+          <div>
+            <div class="field-label">Bitrate</div>
+            <div id="bitrateGroup" class="segmented" data-value="2500">
+              <button type="button" data-value="">Auto</button>
+              <button type="button" data-value="1000">1 Mbps</button>
+              <button type="button" data-value="2500" class="active">2.5 Mbps</button>
+              <button type="button" data-value="5000">5 Mbps</button>
+              <button type="button" data-value="8000">8 Mbps</button>
+              <button type="button" data-value="12000">12 Mbps</button>
+            </div>
+          </div>
         </div>
         <button id="startShareBtn" class="btn btn-primary">🖥️ Iniciar Compartilhamento</button>
       </div>
@@ -54,6 +65,7 @@
         <span id="roomCodeDisplay" class="status-badge"></span>
         <span id="status" class="status-badge">Inicializando conexão...</span>
         <button id="copyLinkBtn" class="btn btn-ghost">🔗 Copiar link da sala</button>
+        <button id="leaveRoomBtn" class="btn btn-ghost">🚪 Sair da Sala</button>
       </div>
 
       <div id="videos" class="video-grid"></div>

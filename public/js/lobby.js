@@ -1,4 +1,6 @@
 import { state } from './state.js';
+import { stopSharing } from './share.js';
+import { closeAllPeerConnections } from './peers.js';
 
 const lobby = document.getElementById('lobby');
 const appScreen = document.getElementById('appScreen');
@@ -8,6 +10,7 @@ const lobbyError = document.getElementById('lobbyError');
 const enterBtn = document.getElementById('enterBtn');
 const roomCodeDisplay = document.getElementById('roomCodeDisplay');
 const copyLinkBtn = document.getElementById('copyLinkBtn');
+const leaveRoomBtn = document.getElementById('leaveRoomBtn');
 const statusText = document.getElementById('status');
 
 let socket = null;
@@ -42,6 +45,33 @@ function enterRoom() {
   }
 }
 
+// Tears down local media/connections and returns to the lobby. Reconnecting
+// the socket gives us a fresh id and lets the server's disconnect handler
+// clean up our old room membership and notify the peers we left.
+function leaveRoom() {
+  stopSharing();
+  closeAllPeerConnections();
+
+  state.hasEntered = false;
+  state.roomId = null;
+  state.myUsername = null;
+  state.currentRoomUrl = null;
+  state.knownPeers.clear();
+  state.peerUsernames.clear();
+
+  const url = new URL(window.location.href);
+  url.searchParams.delete('room');
+  window.history.replaceState({}, '', url);
+
+  appScreen.style.display = 'none';
+  lobby.style.display = '';
+  lobbyError.textContent = '';
+  roomCodeInput.value = '';
+
+  socket.disconnect();
+  socket.connect();
+}
+
 // Wires the lobby form and the room-join handshake on (re)connect.
 export function initLobby(theSocket) {
   socket = theSocket;
@@ -49,6 +79,8 @@ export function initLobby(theSocket) {
   enterBtn.addEventListener('click', enterRoom);
   usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
   roomCodeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
+
+  leaveRoomBtn.addEventListener('click', leaveRoom);
 
   copyLinkBtn.addEventListener('click', async () => {
     await navigator.clipboard.writeText(state.currentRoomUrl);
