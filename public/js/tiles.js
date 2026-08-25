@@ -1,0 +1,96 @@
+const videosContainer = document.getElementById('videos');
+const tiles = new Map(); // tile key ('local' or socket id) -> tile <div>
+
+// Fullscreens the tile wrapper, not the <video> itself — Chrome overlays
+// its own native play/pause/volume controls when a <video> element goes
+// fullscreen directly, which makes no sense for a live stream and hides
+// our own overlay. Fullscreening the wrapping div avoids that.
+function toggleFullscreen(el) {
+  if (document.fullscreenElement === el) {
+    document.exitFullscreen();
+  } else {
+    el.requestFullscreen();
+  }
+}
+
+// One video tile per stream (your own preview plus one per remote streamer).
+// Tiles always start muted — Chrome blocks unmuted autoplay without a prior
+// user gesture, which a friend just opening the room link won't have given
+// yet. Remote tiles get a mute toggle and a volume slider.
+export function addOrUpdateTile(key, stream, label, isLocal) {
+  let tile = tiles.get(key);
+  if (!tile) {
+    tile = document.createElement('div');
+    tile.className = 'tile';
+
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = true;
+    video.ondblclick = () => toggleFullscreen(tile);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'tile-overlay';
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'tile-label';
+
+    const actions = document.createElement('div');
+    actions.className = 'tile-actions';
+
+    if (!isLocal) {
+      const muteBtn = document.createElement('button');
+      muteBtn.className = 'icon-btn';
+      muteBtn.title = 'Mudo';
+      muteBtn.textContent = '🔇';
+      muteBtn.onclick = () => {
+        video.muted = !video.muted;
+        muteBtn.textContent = video.muted ? '🔇' : '🔊';
+        muteBtn.title = video.muted ? 'Ativar som' : 'Mudo';
+      };
+      actions.appendChild(muteBtn);
+
+      const volumeSlider = document.createElement('input');
+      volumeSlider.type = 'range';
+      volumeSlider.className = 'volume-slider';
+      volumeSlider.min = '0';
+      volumeSlider.max = '1';
+      volumeSlider.step = '0.05';
+      volumeSlider.value = '1';
+      volumeSlider.title = 'Volume';
+      volumeSlider.oninput = () => {
+        video.volume = Number(volumeSlider.value);
+        video.muted = false;
+        muteBtn.textContent = '🔊';
+        muteBtn.title = 'Mudo';
+      };
+      actions.appendChild(volumeSlider);
+    }
+
+    const fullscreenBtn = document.createElement('button');
+    fullscreenBtn.className = 'icon-btn';
+    fullscreenBtn.title = 'Tela cheia';
+    fullscreenBtn.textContent = '⛶';
+    fullscreenBtn.onclick = () => toggleFullscreen(tile);
+    actions.appendChild(fullscreenBtn);
+
+    overlay.appendChild(labelEl);
+    overlay.appendChild(actions);
+    tile.appendChild(video);
+    tile.appendChild(overlay);
+
+    videosContainer.appendChild(tile);
+    tiles.set(key, tile);
+  }
+
+  tile.querySelector('video').srcObject = stream;
+  tile.querySelector('.tile-label').textContent = label;
+}
+
+export function removeTile(key) {
+  const tile = tiles.get(key);
+  if (tile) {
+    tile.remove();
+    tiles.delete(key);
+  }
+}

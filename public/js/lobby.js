@@ -1,0 +1,66 @@
+import { state } from './state.js';
+
+const lobby = document.getElementById('lobby');
+const appScreen = document.getElementById('appScreen');
+const usernameInput = document.getElementById('usernameInput');
+const roomCodeInput = document.getElementById('roomCodeInput');
+const lobbyError = document.getElementById('lobbyError');
+const enterBtn = document.getElementById('enterBtn');
+const roomCodeDisplay = document.getElementById('roomCodeDisplay');
+const copyLinkBtn = document.getElementById('copyLinkBtn');
+const statusText = document.getElementById('status');
+
+let socket = null;
+
+// Prefill the room code from a shared link, so a friend opening it only
+// has to type a name.
+const prefilledRoom = new URL(window.location.href).searchParams.get('room');
+if (prefilledRoom) roomCodeInput.value = prefilledRoom;
+
+function enterRoom() {
+  const username = usernameInput.value.trim();
+  if (!username) {
+    lobbyError.textContent = 'Por favor, insira um nome.';
+    return;
+  }
+
+  state.roomId = roomCodeInput.value.trim() || crypto.randomUUID().slice(0, 8);
+  state.myUsername = username;
+  state.hasEntered = true;
+
+  const url = new URL(window.location.href);
+  url.searchParams.set('room', state.roomId);
+  window.history.replaceState({}, '', url);
+  state.currentRoomUrl = url.href;
+  roomCodeDisplay.textContent = `Código da Sala: ${state.roomId}`;
+
+  lobby.style.display = 'none';
+  appScreen.style.display = '';
+
+  if (socket.connected) {
+    socket.emit('join-room', { roomId: state.roomId, username: state.myUsername });
+  }
+}
+
+// Wires the lobby form and the room-join handshake on (re)connect.
+export function initLobby(theSocket) {
+  socket = theSocket;
+
+  enterBtn.addEventListener('click', enterRoom);
+  usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
+  roomCodeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
+
+  copyLinkBtn.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(state.currentRoomUrl);
+    const original = copyLinkBtn.textContent;
+    copyLinkBtn.textContent = '✅ Copiado!';
+    setTimeout(() => { copyLinkBtn.textContent = original; }, 1500);
+  });
+
+  socket.on('connect', () => {
+    statusText.innerText = 'Conectado. Compartilhe o link da sala para convidar outras pessoas.';
+    if (state.hasEntered) {
+      socket.emit('join-room', { roomId: state.roomId, username: state.myUsername });
+    }
+  });
+}
