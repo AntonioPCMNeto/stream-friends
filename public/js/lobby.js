@@ -20,6 +20,27 @@ let socket = null;
 const prefilledRoom = new URL(window.location.href).searchParams.get('room');
 if (prefilledRoom) roomCodeInput.value = prefilledRoom;
 
+const USERNAME_STORAGE_KEY = 'scrimaAi.username';
+
+// Wrapped defensively — localStorage can throw in private/locked-down contexts.
+function loadSavedUsername() {
+  try {
+    return localStorage.getItem(USERNAME_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveUsername(username) {
+  try {
+    localStorage.setItem(USERNAME_STORAGE_KEY, username);
+  } catch {
+    // Ignore — persistence is a nice-to-have, not required to enter the room.
+  }
+}
+
+usernameInput.value = loadSavedUsername();
+
 function enterRoom() {
   const username = usernameInput.value.trim();
   if (!username) {
@@ -30,6 +51,7 @@ function enterRoom() {
   state.roomId = roomCodeInput.value.trim() || crypto.randomUUID().slice(0, 8);
   state.myUsername = username;
   state.hasEntered = true;
+  saveUsername(username);
 
   const url = new URL(window.location.href);
   url.searchParams.set('room', state.roomId);

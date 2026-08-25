@@ -48,6 +48,11 @@ export function stopSharing() {
 
 // HOST SIDE: capture screen and call everyone in the room
 async function startSharing() {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    statusText.innerText = 'Compartilhamento de tela não é suportado neste navegador/dispositivo.';
+    return;
+  }
+
   try {
     const framerate = Number(framerateGroup.dataset.value);
     const videoConstraints = { frameRate: { ideal: framerate, max: framerate } };
@@ -60,10 +65,18 @@ async function startSharing() {
 
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: videoConstraints,
-      // Sharing a tab or a single app window always captures just that
-      // source's audio; systemAudio only affects the "Entire Screen" case
-      // — 'include' (the default) lets it fall back to whole-system audio there.
-      audio: { systemAudio: 'include' }
+      audio: {
+        // Sharing a tab or a single app window always captures just that
+        // source's audio; systemAudio only affects the "Entire Screen" case
+        // — 'include' (the default) lets it fall back to whole-system audio there.
+        systemAudio: 'include',
+        // echoCancellation/noiseSuppression/autoGainControl default to browser
+        // mic-processing behavior, which can audibly mangle captured system/tab
+        // audio (music, game sound). This is display audio, not a microphone.
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      }
     });
 
     // Tells the encoder to favor smooth frame delivery over per-frame
@@ -84,7 +97,15 @@ async function startSharing() {
     stream.getVideoTracks()[0].onended = () => stopSharing();
   } catch (err) {
     console.error('Failed to capture screen:', err);
-    statusText.innerText = 'Erro ao capturar a tela.';
+    // getDisplayMedia doesn't distinguish "user clicked Cancel" from "user
+    // denied permission" — both surface as NotAllowedError.
+    if (err.name === 'NotAllowedError') {
+      statusText.innerText = 'Permissão negada ou compartilhamento cancelado.';
+    } else if (err.name === 'NotSupportedError' || err.name === 'NotFoundError') {
+      statusText.innerText = 'Compartilhamento de tela não é suportado neste navegador/dispositivo.';
+    } else {
+      statusText.innerText = 'Erro ao capturar a tela.';
+    }
   }
 }
 

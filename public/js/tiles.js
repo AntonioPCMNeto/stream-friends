@@ -29,6 +29,9 @@ export function addOrUpdateTile(key, stream, label, isLocal) {
     video.muted = true;
     video.ondblclick = () => toggleFullscreen(tile);
 
+    const statsEl = document.createElement('div');
+    statsEl.className = 'tile-stats';
+
     const overlay = document.createElement('div');
     overlay.className = 'tile-overlay';
 
@@ -67,6 +70,25 @@ export function addOrUpdateTile(key, stream, label, isLocal) {
       actions.appendChild(volumeSlider);
     }
 
+    if (document.pictureInPictureEnabled && !video.disablePictureInPicture) {
+      const pipBtn = document.createElement('button');
+      pipBtn.className = 'icon-btn';
+      pipBtn.title = 'Picture-in-Picture';
+      pipBtn.textContent = '🗗';
+      pipBtn.onclick = async () => {
+        try {
+          if (document.pictureInPictureElement === video) {
+            await document.exitPictureInPicture();
+          } else {
+            await video.requestPictureInPicture();
+          }
+        } catch (err) {
+          console.error('Failed to toggle Picture-in-Picture:', err);
+        }
+      };
+      actions.appendChild(pipBtn);
+    }
+
     const fullscreenBtn = document.createElement('button');
     fullscreenBtn.className = 'icon-btn';
     fullscreenBtn.title = 'Tela cheia';
@@ -77,6 +99,7 @@ export function addOrUpdateTile(key, stream, label, isLocal) {
     overlay.appendChild(labelEl);
     overlay.appendChild(actions);
     tile.appendChild(video);
+    tile.appendChild(statsEl);
     tile.appendChild(overlay);
 
     videosContainer.appendChild(tile);
@@ -85,6 +108,15 @@ export function addOrUpdateTile(key, stream, label, isLocal) {
 
   tile.querySelector('video').srcObject = stream;
   tile.querySelector('.tile-label').textContent = label;
+}
+
+// Updates the small "1280x720 · 30fps · 850kbps" badge shown on a tile.
+// No-op if the tile doesn't exist (e.g. a stats sample arriving right as
+// the tile is torn down).
+export function updateTileStats(key, text) {
+  const tile = tiles.get(key);
+  if (!tile) return;
+  tile.querySelector('.tile-stats').textContent = text;
 }
 
 export function removeTile(key) {

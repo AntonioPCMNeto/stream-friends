@@ -207,6 +207,20 @@ main {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tile-stats {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: rgba(0, 0, 0, 0.55);
+  padding: 4px 9px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+.tile-stats:empty { display: none; }
+
 .tile-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .icon-btn {
   width: 30px;
@@ -229,3 +243,27 @@ main {
   cursor: pointer;
   align-self: center;
 }
+
+/* Toasts */
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  opacity: 1;
+  transition: opacity 0.5s;
+}
+.toast-hide { opacity: 0; }
