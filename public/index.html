@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P2P Screen Share</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 20px; background: #121212; color: #fff; }
+    button { padding: 10px 20px; font-size: 16px; margin: 10px; cursor: pointer; border-radius: 5px; border: none; background: #007bff; color: white; }
+    button:disabled { background: #555; cursor: not-allowed; }
+
+    .video-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    .tile {
+      position: relative;
+      width: 400px;
+      max-width: 90vw;
+    }
+    .tile video {
+      width: 100%;
+      background: #000;
+      border-radius: 8px;
+      display: block;
+    }
+    .tile .label {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .tile .unmute-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      margin: 0;
+      padding: 4px 10px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <h1>P2P Screen Sharing</h1>
+  <div>
+    <button id="startShareBtn">Start Sharing Screen</button>
+  </div>
+  <p id="status">Status: Initializing connection...</p>
+  <p>Room link: <a id="roomLink" href="#" target="_blank"></a></p>
+
+  <div id="videos" class="video-grid"></div>
+
+  <!-- Include Socket.io via CDN; app.js does raw WebRTC signaling over it -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

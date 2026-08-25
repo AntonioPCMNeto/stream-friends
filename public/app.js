@@ -1,0 +1,198 @@
+const socket = io();
+
+// STUN handles most NATs; TURN relays traffic when a direct connection
+// can't be established (symmetric NATs, restrictive firewalls).
+// Using the free Open Relay Project (metered.ca) — public demo credentials,
+// no signup required. Swap for a private TURN provider or self-hosted
+// coturn if you outgrow its shared bandwidth limits.
+const iceServers = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:openrelay.metered.ca:80' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+];
+
+const videosContainer = document.getElementById('videos');
+const startBtn = document.getElementById('startShareBtn');
+const statusText = document.getElementById('status');
+const roomLink = document.getElementById('roomLink');
+
+let localStream = null;
+let isSharing = false;
+const knownPeers = new Set(); // remote socket ids
+const peerConnections = new Map(); // socket id -> RTCPeerConnection
+const tiles = new Map(); // tile key ('local' or socket id) -> tile <div>
+
+// One video tile per stream (your own preview plus one per remote streamer).
+// Tiles always start muted — Chrome blocks unmuted autoplay without a prior
+// user gesture, which a friend just opening the room link won't have given
+// yet. Remote tiles get an Unmute button; the click itself is the gesture.
+function addOrUpdateTile(key, stream, label, isLocal) {
+  let tile = tiles.get(key);
+  if (!tile) {
+    tile = document.createElement('div');
+    tile.className = 'tile';
+
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = true;
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'label';
+
+    tile.appendChild(video);
+    tile.appendChild(labelEl);
+
+    if (!isLocal) {
+      const unmuteBtn = document.createElement('button');
+      unmuteBtn.className = 'unmute-btn';
+      unmuteBtn.textContent = '🔊 Unmute';
+      unmuteBtn.onclick = () => {
+        video.muted = false;
+        unmuteBtn.remove();
+      };
+      tile.appendChild(unmuteBtn);
+    }
+
+    videosContainer.appendChild(tile);
+    tiles.set(key, tile);
+  }
+
+  tile.querySelector('video').srcObject = stream;
+  tile.querySelector('.label').textContent = label;
+}
+
+function removeTile(key) {
+  const tile = tiles.get(key);
+  if (tile) {
+    tile.remove();
+    tiles.delete(key);
+  }
+}
+
+// Room comes from the URL; generate and persist one if missing
+const url = new URL(window.location.href);
+let roomId = url.searchParams.get('room');
+if (!roomId) {
+  roomId = crypto.randomUUID().slice(0, 8);
+  url.searchParams.set('room', roomId);
+  window.history.replaceState({}, '', url);
+}
+roomLink.href = url.href;
+roomLink.textContent = url.href;
+
+function getOrCreatePeerConnection(peerId) {
+  let pc = peerConnections.get(peerId);
+  if (pc) return pc;
+
+  pc = new RTCPeerConnection({ iceServers });
+
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      socket.emit('signal', { to: peerId, data: { type: 'candidate', candidate: event.candidate } });
+    }
+  };
+
+  // RECEIVER SIDE: a remote track means someone is sending us their screen
+  pc.ontrack = (event) => {
+    addOrUpdateTile(peerId, event.streams[0], `Peer ${peerId.slice(0, 5)}`, false /* isLocal */);
+    statusText.innerText = 'Viewing remote screen(s).';
+
+    event.track.onended = () => removeTile(peerId);
+  };
+
+  peerConnections.set(peerId, pc);
+  return pc;
+}
+
+function closePeerConnection(peerId) {
+  const pc = peerConnections.get(peerId);
+  if (pc) {
+    pc.close();
+    peerConnections.delete(peerId);
+  }
+  removeTile(peerId);
+}
+
+// HOST SIDE: open a connection to a peer and offer our screen stream
+async function callPeer(peerId) {
+  if (!localStream) return;
+  const pc = getOrCreatePeerConnection(peerId);
+  localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  socket.emit('signal', { to: peerId, data: { type: 'offer', sdp: offer } });
+}
+
+socket.on('connect', () => {
+  statusText.innerText = 'Connected. Share the room link to invite others.';
+  socket.emit('join-room', roomId);
+});
+
+// Peers already in the room when we joined
+socket.on('existing-peers', (peerIds) => {
+  peerIds.forEach((id) => knownPeers.add(id));
+  if (isSharing) peerIds.forEach(callPeer);
+});
+
+// A peer joined after us — call them if we're already sharing
+socket.on('viewer-joined', (peerId) => {
+  knownPeers.add(peerId);
+  if (isSharing) callPeer(peerId);
+});
+
+socket.on('peer-left', (peerId) => {
+  knownPeers.delete(peerId);
+  closePeerConnection(peerId);
+});
+
+// Handle incoming offer/answer/ICE-candidate messages relayed by the server
+socket.on('signal', async ({ from, data }) => {
+  const pc = getOrCreatePeerConnection(from);
+
+  if (data.type === 'offer') {
+    await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    socket.emit('signal', { to: from, data: { type: 'answer', sdp: answer } });
+  } else if (data.type === 'answer') {
+    await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+  } else if (data.type === 'candidate') {
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+    } catch (err) {
+      console.error('Failed to add ICE candidate:', err);
+    }
+  }
+});
+
+// HOST SIDE: capture screen and call everyone in the room
+startBtn.addEventListener('click', async () => {
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { max: 30 } },
+      audio: true
+    });
+
+    localStream = stream;
+    isSharing = true;
+    addOrUpdateTile('local', stream, 'You (sharing)', true /* isLocal */);
+    statusText.innerText = 'Sharing your screen...';
+
+    // Call everyone already known in the room
+    knownPeers.forEach(callPeer);
+
+    // Handle user stopping stream via browser UI
+    stream.getVideoTracks()[0].onended = () => {
+      isSharing = false;
+      localStream = null;
+      removeTile('local');
+      statusText.innerText = 'Screen sharing stopped.';
+    };
+  } catch (err) {
+    console.error('Failed to capture screen:', err);
+    statusText.innerText = 'Error capturing screen.';
+  }
+});
