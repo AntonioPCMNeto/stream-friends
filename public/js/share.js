@@ -3,7 +3,9 @@ import { addOrUpdateTile, removeTile } from './tiles.js';
 import { callPeer, updateBitrate } from './peers.js';
 
 const startBtn = document.getElementById('startShareBtn');
-const shareOptions = document.getElementById('shareOptions');
+const shareControl = document.querySelector('.share-control');
+const sharePanel = document.getElementById('sharePanel');
+const confirmShareBtn = document.getElementById('confirmShareBtn');
 const resolutionGroup = document.getElementById('resolutionGroup');
 const framerateGroup = document.getElementById('framerateGroup');
 const bitrateGroup = document.getElementById('bitrateGroup');
@@ -25,8 +27,10 @@ function setSharingUI(sharing) {
   startBtn.textContent = sharing ? '⏹ Parar Compartilhamento' : '🖥️ Iniciar Compartilhamento';
   startBtn.classList.toggle('btn-danger', sharing);
   startBtn.classList.toggle('btn-primary', !sharing);
-  shareOptions.style.display = sharing ? 'none' : '';
 }
+
+function openPanel() { sharePanel.classList.remove('hidden'); }
+function closePanel() { sharePanel.classList.add('hidden'); }
 
 // Stops our outgoing tracks. This also ends the corresponding remote track
 // on every peer's connection, so their tile disappears without extra signaling.
@@ -100,8 +104,26 @@ export function initSharing() {
   startBtn.addEventListener('click', () => {
     if (state.isSharing) {
       stopSharing();
+    } else if (sharePanel.classList.contains('hidden')) {
+      openPanel();
     } else {
-      startSharing();
+      closePanel();
     }
+  });
+
+  confirmShareBtn.addEventListener('click', () => {
+    closePanel();
+    startSharing();
+  });
+
+  // Close the panel on an outside click or Escape, without swallowing the
+  // click that opened it (startBtn's own listener runs first via bubbling).
+  document.addEventListener('click', (e) => {
+    if (!sharePanel.classList.contains('hidden') && !shareControl.contains(e.target)) {
+      closePanel();
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closePanel();
   });
 }

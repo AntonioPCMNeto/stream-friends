@@ -81,19 +81,35 @@ main {
 
 #enterBtn { width: 100%; }
 
-#startShareBtn { margin-left: auto; }
-
 /* App screen */
 .toolbar {
   max-width: 1100px;
   margin: 12px auto 0;
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  justify-content: flex-end;
 }
-.control-group { display: flex; gap: 16px; }
+.share-control { position: relative; }
+
+.share-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 20;
+  width: 340px;
+  max-width: calc(100vw - 40px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+.share-panel.hidden { display: none; }
+#confirmShareBtn { width: 100%; }
+
+.control-group { display: flex; flex-direction: column; gap: 14px; }
 .field-label {
   font-size: 12px;
   color: var(--text-dim);
@@ -101,6 +117,7 @@ main {
 }
 .segmented {
   display: flex;
+  flex-wrap: wrap;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 999px;
