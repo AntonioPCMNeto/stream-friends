@@ -5,88 +5,242 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>P2P Screen Share</title>
   <style>
-    body { font-family: sans-serif; text-align: center; padding: 20px; background: #121212; color: #fff; }
-    button { padding: 10px 20px; font-size: 16px; margin: 10px; cursor: pointer; border-radius: 5px; border: none; background: #007bff; color: white; }
-    button:disabled { background: #555; cursor: not-allowed; }
+    :root {
+      --bg: #0b0b10;
+      --surface: #16161d;
+      --surface-2: #1e1e28;
+      --border: #2a2a35;
+      --text: #f2f2f5;
+      --text-dim: #9a9aa5;
+      --accent: #6366f1;
+      --accent-hover: #7577f3;
+      --danger: #ff6b6b;
+      --radius: 12px;
+    }
 
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: radial-gradient(circle at top, #1a1a25, var(--bg) 60%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .app-header {
+      padding: 20px 32px;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    main {
+      padding: 0 20px 60px;
+    }
+
+    .btn {
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-primary:disabled { background: #444; cursor: not-allowed; }
+    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
+    .btn-ghost:hover { color: var(--text); border-color: var(--accent); }
+
+    /* Lobby */
+    .card {
+      max-width: 380px;
+      margin: 80px auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    }
+    .card h2 { margin: 0 0 20px; font-size: 18px; }
+
+    .field { display: block; margin-bottom: 16px; text-align: left; }
+    .field span { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+    .field input {
+      width: 100%;
+      padding: 10px 12px;
+      font-size: 15px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      transition: border-color 0.15s;
+    }
+    .field input:focus { outline: none; border-color: var(--accent); }
+
+    .error { color: var(--danger); font-size: 13px; min-height: 18px; margin: 0 0 8px; }
+
+    #enterBtn { width: 100%; }
+
+    /* App screen */
+    .toolbar {
+      max-width: 1100px;
+      margin: 12px auto 0;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .control-group { display: flex; gap: 12px; }
+    .control-group label {
+      font-size: 12px;
+      color: var(--text-dim);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .control-group select {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .status-row {
+      max-width: 1100px;
+      margin: 16px auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .status-badge {
+      font-size: 13px;
+      color: var(--text-dim);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 999px;
+    }
+
+    /* Video grid */
     .video-grid {
+      max-width: 1100px;
+      margin: 24px auto 0;
       display: flex;
       flex-wrap: wrap;
-      gap: 15px;
+      gap: 18px;
       justify-content: center;
-      margin-top: 20px;
     }
     .tile {
       position: relative;
       width: 400px;
-      max-width: 90vw;
+      max-width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #000;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
     }
     .tile video {
       width: 100%;
+      height: 100%;
+      object-fit: contain;
       background: #000;
-      border-radius: 8px;
       display: block;
     }
-    .tile .label {
+    .tile-overlay {
       position: absolute;
-      bottom: 8px;
-      left: 8px;
-      background: rgba(0, 0, 0, 0.6);
-      padding: 2px 8px;
-      border-radius: 4px;
+      left: 0; right: 0; bottom: 0;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
+    }
+    .tile-label {
       font-size: 13px;
+      font-weight: 600;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .tile .unmute-btn {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      margin: 0;
-      padding: 4px 10px;
-      font-size: 13px;
+    .tile-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .icon-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(0, 0, 0, 0.55);
+      color: white;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s;
     }
-
-    #lobby {
-      max-width: 320px;
-      margin: 60px auto;
-    }
-    #lobby input {
-      display: block;
-      width: 100%;
-      box-sizing: border-box;
-      padding: 10px;
-      margin: 10px 0;
-      font-size: 16px;
-      border-radius: 5px;
-      border: 1px solid #444;
-      background: #1e1e1e;
-      color: #fff;
-    }
-    #lobby .error {
-      color: #ff6b6b;
-      font-size: 13px;
-      min-height: 18px;
-    }
+    .icon-btn:hover { background: rgba(0, 0, 0, 0.8); }
   </style>
 </head>
 <body>
-  <h1>P2P Screen Sharing</h1>
+  <header class="app-header">🖥️ Scrima aí</header>
 
-  <div id="lobby">
-    <input id="usernameInput" type="text" placeholder="Your name" maxlength="30">
-    <input id="roomCodeInput" type="text" placeholder="Room code (leave blank to create a new room)" maxlength="30">
-    <p id="lobbyError" class="error"></p>
-    <button id="enterBtn">Enter Room</button>
-  </div>
-
-  <div id="appScreen" style="display: none;">
-    <div>
-      <button id="startShareBtn">Start Sharing Screen</button>
+  <main>
+    <div id="lobby" class="card">
+      <h2>Join a room</h2>
+      <label class="field">
+        <span>Your name</span>
+        <input id="usernameInput" type="text" placeholder="e.g. Alex" maxlength="30">
+      </label>
+      <label class="field">
+        <span>Room code</span>
+        <input id="roomCodeInput" type="text" placeholder="Leave blank to create a new room" maxlength="30">
+      </label>
+      <p id="lobbyError" class="error"></p>
+      <button id="enterBtn" class="btn btn-primary">Enter Room</button>
     </div>
-    <p id="status">Status: Initializing connection...</p>
-    <p>Room link: <a id="roomLink" href="#" target="_blank"></a></p>
 
-    <div id="videos" class="video-grid"></div>
-  </div>
+    <div id="appScreen" style="display: none;">
+      <div class="toolbar">
+        <div class="control-group">
+          <label>Resolution
+            <select id="resolutionSelect">
+              <option value="auto">Source (auto)</option>
+              <option value="1920x1080">1080p</option>
+              <option value="1280x720" selected>720p</option>
+              <option value="854x480">480p</option>
+            </select>
+          </label>
+          <label>Frame rate
+            <select id="framerateSelect">
+              <option value="15">15 fps</option>
+              <option value="30" selected>30 fps</option>
+              <option value="60">60 fps</option>
+            </select>
+          </label>
+        </div>
+        <button id="startShareBtn" class="btn btn-primary">Start Sharing Screen</button>
+      </div>
+
+      <div class="status-row">
+        <span id="status" class="status-badge">Initializing connection...</span>
+        <button id="copyLinkBtn" class="btn btn-ghost">🔗 Copy room link</button>
+      </div>
+
+      <div id="videos" class="video-grid"></div>
+    </div>
+  </main>
 
   <!-- Include Socket.io via CDN; app.js does raw WebRTC signaling over it -->
   <script src="/socket.io/socket.io.js"></script>

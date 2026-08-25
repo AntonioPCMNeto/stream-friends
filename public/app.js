@@ -22,18 +22,29 @@ const enterBtn = document.getElementById('enterBtn');
 
 const videosContainer = document.getElementById('videos');
 const startBtn = document.getElementById('startShareBtn');
+const resolutionSelect = document.getElementById('resolutionSelect');
+const framerateSelect = document.getElementById('framerateSelect');
 const statusText = document.getElementById('status');
-const roomLink = document.getElementById('roomLink');
+const copyLinkBtn = document.getElementById('copyLinkBtn');
 
 let localStream = null;
 let isSharing = false;
 let roomId = null;
 let myUsername = null;
 let hasEntered = false;
+let currentRoomUrl = null;
 const knownPeers = new Set(); // remote socket ids
 const peerUsernames = new Map(); // socket id -> username
 const peerConnections = new Map(); // socket id -> RTCPeerConnection
 const tiles = new Map(); // tile key ('local' or socket id) -> tile <div>
+
+function toggleFullscreen(video) {
+  if (document.fullscreenElement === video) {
+    document.exitFullscreen();
+  } else {
+    video.requestFullscreen();
+  }
+}
 
 // One video tile per stream (your own preview plus one per remote streamer).
 // Tiles always start muted — Chrome blocks unmuted autoplay without a prior
@@ -49,30 +60,47 @@ function addOrUpdateTile(key, stream, label, isLocal) {
     video.autoplay = true;
     video.playsInline = true;
     video.muted = true;
+    video.ondblclick = () => toggleFullscreen(video);
 
-    const labelEl = document.createElement('div');
-    labelEl.className = 'label';
+    const overlay = document.createElement('div');
+    overlay.className = 'tile-overlay';
 
-    tile.appendChild(video);
-    tile.appendChild(labelEl);
+    const labelEl = document.createElement('span');
+    labelEl.className = 'tile-label';
+
+    const actions = document.createElement('div');
+    actions.className = 'tile-actions';
 
     if (!isLocal) {
       const unmuteBtn = document.createElement('button');
-      unmuteBtn.className = 'unmute-btn';
-      unmuteBtn.textContent = '🔊 Unmute';
+      unmuteBtn.className = 'icon-btn';
+      unmuteBtn.title = 'Unmute';
+      unmuteBtn.textContent = '🔊';
       unmuteBtn.onclick = () => {
         video.muted = false;
         unmuteBtn.remove();
       };
-      tile.appendChild(unmuteBtn);
+      actions.appendChild(unmuteBtn);
     }
+
+    const fullscreenBtn = document.createElement('button');
+    fullscreenBtn.className = 'icon-btn';
+    fullscreenBtn.title = 'Fullscreen';
+    fullscreenBtn.textContent = '⛶';
+    fullscreenBtn.onclick = () => toggleFullscreen(video);
+    actions.appendChild(fullscreenBtn);
+
+    overlay.appendChild(labelEl);
+    overlay.appendChild(actions);
+    tile.appendChild(video);
+    tile.appendChild(overlay);
 
     videosContainer.appendChild(tile);
     tiles.set(key, tile);
   }
 
   tile.querySelector('video').srcObject = stream;
-  tile.querySelector('.label').textContent = label;
+  tile.querySelector('.tile-label').textContent = label;
 }
 
 function removeTile(key) {
@@ -102,8 +130,7 @@ function enterRoom() {
   const url = new URL(window.location.href);
   url.searchParams.set('room', roomId);
   window.history.replaceState({}, '', url);
-  roomLink.href = url.href;
-  roomLink.textContent = url.href;
+  currentRoomUrl = url.href;
 
   lobby.style.display = 'none';
   appScreen.style.display = '';
@@ -116,6 +143,13 @@ function enterRoom() {
 enterBtn.addEventListener('click', enterRoom);
 usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
 roomCodeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
+
+copyLinkBtn.addEventListener('click', async () => {
+  await navigator.clipboard.writeText(currentRoomUrl);
+  const original = copyLinkBtn.textContent;
+  copyLinkBtn.textContent = '✅ Copied!';
+  setTimeout(() => { copyLinkBtn.textContent = original; }, 1500);
+});
 
 function getOrCreatePeerConnection(peerId) {
   let pc = peerConnections.get(peerId);
@@ -213,8 +247,17 @@ socket.on('signal', async ({ from, data }) => {
 // HOST SIDE: capture screen and call everyone in the room
 startBtn.addEventListener('click', async () => {
   try {
+    const framerate = Number(framerateSelect.value);
+    const videoConstraints = { frameRate: { ideal: framerate, max: framerate } };
+
+    if (resolutionSelect.value !== 'auto') {
+      const [width, height] = resolutionSelect.value.split('x').map(Number);
+      videoConstraints.width = { ideal: width };
+      videoConstraints.height = { ideal: height };
+    }
+
     const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { max: 30 } },
+      video: videoConstraints,
       audio: true
     });
 
