@@ -22,10 +22,25 @@ const enterBtn = document.getElementById('enterBtn');
 
 const videosContainer = document.getElementById('videos');
 const startBtn = document.getElementById('startShareBtn');
-const resolutionSelect = document.getElementById('resolutionSelect');
-const framerateSelect = document.getElementById('framerateSelect');
+const resolutionGroup = document.getElementById('resolutionGroup');
+const framerateGroup = document.getElementById('framerateGroup');
 const statusText = document.getElementById('status');
 const copyLinkBtn = document.getElementById('copyLinkBtn');
+const roomCodeDisplay = document.getElementById('roomCodeDisplay');
+
+// Wires a row of segmented buttons: clicking one marks it active and
+// updates the group's data-value, which the Start button reads later.
+function initSegmented(group) {
+  group.querySelectorAll('button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      group.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      group.dataset.value = btn.dataset.value;
+    });
+  });
+}
+initSegmented(resolutionGroup);
+initSegmented(framerateGroup);
 
 let localStream = null;
 let isSharing = false;
@@ -74,7 +89,7 @@ function addOrUpdateTile(key, stream, label, isLocal) {
     if (!isLocal) {
       const unmuteBtn = document.createElement('button');
       unmuteBtn.className = 'icon-btn';
-      unmuteBtn.title = 'Unmute';
+      unmuteBtn.title = 'Ativar som';
       unmuteBtn.textContent = '🔊';
       unmuteBtn.onclick = () => {
         video.muted = false;
@@ -85,7 +100,7 @@ function addOrUpdateTile(key, stream, label, isLocal) {
 
     const fullscreenBtn = document.createElement('button');
     fullscreenBtn.className = 'icon-btn';
-    fullscreenBtn.title = 'Fullscreen';
+    fullscreenBtn.title = 'Tela cheia';
     fullscreenBtn.textContent = '⛶';
     fullscreenBtn.onclick = () => toggleFullscreen(video);
     actions.appendChild(fullscreenBtn);
@@ -119,7 +134,7 @@ if (prefilledRoom) roomCodeInput.value = prefilledRoom;
 function enterRoom() {
   const username = usernameInput.value.trim();
   if (!username) {
-    lobbyError.textContent = 'Please enter a name.';
+    lobbyError.textContent = 'Por favor, insira um nome.';
     return;
   }
 
@@ -131,6 +146,7 @@ function enterRoom() {
   url.searchParams.set('room', roomId);
   window.history.replaceState({}, '', url);
   currentRoomUrl = url.href;
+  roomCodeDisplay.textContent = `Código da Sala: ${roomId}`;
 
   lobby.style.display = 'none';
   appScreen.style.display = '';
@@ -147,7 +163,7 @@ roomCodeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterR
 copyLinkBtn.addEventListener('click', async () => {
   await navigator.clipboard.writeText(currentRoomUrl);
   const original = copyLinkBtn.textContent;
-  copyLinkBtn.textContent = '✅ Copied!';
+  copyLinkBtn.textContent = '✅ Copiado!';
   setTimeout(() => { copyLinkBtn.textContent = original; }, 1500);
 });
 
@@ -165,9 +181,9 @@ function getOrCreatePeerConnection(peerId) {
 
   // RECEIVER SIDE: a remote track means someone is sending us their screen
   pc.ontrack = (event) => {
-    const label = peerUsernames.get(peerId) || `Peer ${peerId.slice(0, 5)}`;
+    const label = peerUsernames.get(peerId) || `Usuário ${peerId.slice(0, 5)}`;
     addOrUpdateTile(peerId, event.streams[0], label, false /* isLocal */);
-    statusText.innerText = 'Viewing remote screen(s).';
+    statusText.innerText = 'Visualizando tela(s) remota(s).';
 
     event.track.onended = () => removeTile(peerId);
   };
@@ -196,7 +212,7 @@ async function callPeer(peerId) {
 }
 
 socket.on('connect', () => {
-  statusText.innerText = 'Connected. Share the room link to invite others.';
+  statusText.innerText = 'Conectado. Compartilhe o link da sala para convidar outras pessoas.';
   if (hasEntered) {
     socket.emit('join-room', { roomId, username: myUsername });
   }
@@ -244,14 +260,38 @@ socket.on('signal', async ({ from, data }) => {
   }
 });
 
+function setSharingUI(sharing) {
+  startBtn.textContent = sharing ? '⏹ Parar Compartilhamento' : '🖥️ Iniciar Compartilhamento';
+  startBtn.classList.toggle('btn-danger', sharing);
+  startBtn.classList.toggle('btn-primary', !sharing);
+}
+
+// Stops our outgoing tracks. This also ends the corresponding remote track
+// on every peer's connection, so their tile disappears without extra signaling.
+function stopSharing() {
+  if (localStream) {
+    localStream.getTracks().forEach((track) => track.stop());
+  }
+  isSharing = false;
+  localStream = null;
+  removeTile('local');
+  statusText.innerText = 'Compartilhamento de tela interrompido.';
+  setSharingUI(false);
+}
+
 // HOST SIDE: capture screen and call everyone in the room
 startBtn.addEventListener('click', async () => {
+  if (isSharing) {
+    stopSharing();
+    return;
+  }
+
   try {
-    const framerate = Number(framerateSelect.value);
+    const framerate = Number(framerateGroup.dataset.value);
     const videoConstraints = { frameRate: { ideal: framerate, max: framerate } };
 
-    if (resolutionSelect.value !== 'auto') {
-      const [width, height] = resolutionSelect.value.split('x').map(Number);
+    if (resolutionGroup.dataset.value !== 'auto') {
+      const [width, height] = resolutionGroup.dataset.value.split('x').map(Number);
       videoConstraints.width = { ideal: width };
       videoConstraints.height = { ideal: height };
     }
@@ -263,21 +303,17 @@ startBtn.addEventListener('click', async () => {
 
     localStream = stream;
     isSharing = true;
-    addOrUpdateTile('local', stream, `You (${myUsername})`, true /* isLocal */);
-    statusText.innerText = 'Sharing your screen...';
+    addOrUpdateTile('local', stream, `Você (${myUsername})`, true /* isLocal */);
+    statusText.innerText = 'Compartilhando sua tela...';
+    setSharingUI(true);
 
     // Call everyone already known in the room
     knownPeers.forEach(callPeer);
 
-    // Handle user stopping stream via browser UI
-    stream.getVideoTracks()[0].onended = () => {
-      isSharing = false;
-      localStream = null;
-      removeTile('local');
-      statusText.innerText = 'Screen sharing stopped.';
-    };
+    // Handle user stopping the stream via the browser's native share bar
+    stream.getVideoTracks()[0].onended = () => stopSharing();
   } catch (err) {
     console.error('Failed to capture screen:', err);
-    statusText.innerText = 'Error capturing screen.';
+    statusText.innerText = 'Erro ao capturar a tela.';
   }
 });

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>P2P Screen Share</title>
+  <title>Scrima aí</title>
   <style>
     :root {
       --bg: #0b0b10;
@@ -55,6 +55,8 @@
     .btn-primary:disabled { background: #444; cursor: not-allowed; }
     .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
     .btn-ghost:hover { color: var(--text); border-color: var(--accent); }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-danger:hover { background: #f16060; }
 
     /* Lobby */
     .card {
@@ -96,22 +98,33 @@
       gap: 16px;
       flex-wrap: wrap;
     }
-    .control-group { display: flex; gap: 12px; }
-    .control-group label {
+    .control-group { display: flex; gap: 16px; }
+    .field-label {
       font-size: 12px;
       color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+    .segmented {
       display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .control-group select {
-      padding: 8px 10px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
       background: var(--surface-2);
-      color: var(--text);
-      font-size: 14px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px;
+      gap: 2px;
     }
+    .segmented button {
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      border: none;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .segmented button:hover { color: var(--text); }
+    .segmented button.active { background: var(--accent); color: white; }
 
     .status-row {
       max-width: 1100px;
@@ -198,44 +211,49 @@
 
   <main>
     <div id="lobby" class="card">
-      <h2>Join a room</h2>
+      <h2>Entre em uma sala</h2>
       <label class="field">
-        <span>Your name</span>
-        <input id="usernameInput" type="text" placeholder="e.g. Alex" maxlength="30">
+        <span>Seu Nick</span>
+        <input id="usernameInput" type="text" placeholder="ex.: João" maxlength="30">
       </label>
       <label class="field">
-        <span>Room code</span>
-        <input id="roomCodeInput" type="text" placeholder="Leave blank to create a new room" maxlength="30">
+        <span>Código da Sala</span>
+        <input id="roomCodeInput" type="text" placeholder="Deixe em branco para criar uma sala" maxlength="30">
       </label>
       <p id="lobbyError" class="error"></p>
-      <button id="enterBtn" class="btn btn-primary">Enter Room</button>
+      <button id="enterBtn" class="btn btn-primary">Entrar na Sala</button>
     </div>
 
     <div id="appScreen" style="display: none;">
       <div class="toolbar">
         <div class="control-group">
-          <label>Resolution
-            <select id="resolutionSelect">
-              <option value="auto">Source (auto)</option>
-              <option value="1920x1080">1080p</option>
-              <option value="1280x720" selected>720p</option>
-              <option value="854x480">480p</option>
-            </select>
-          </label>
-          <label>Frame rate
-            <select id="framerateSelect">
-              <option value="15">15 fps</option>
-              <option value="30" selected>30 fps</option>
-              <option value="60">60 fps</option>
-            </select>
-          </label>
+          <div>
+            <div class="field-label">Resolução</div>
+            <div id="resolutionGroup" class="segmented" data-value="1280x720">
+              <button type="button" data-value="auto">Origem</button>
+              <button type="button" data-value="640x360">360</button>
+              <button type="button" data-value="854x480">480</button>
+              <button type="button" data-value="1280x720" class="active">720</button>
+              <button type="button" data-value="1920x1080">1080</button>
+              <button type="button" data-value="2560x1440">1440</button>
+            </div>
+          </div>
+          <div>
+            <div class="field-label">Frame rate</div>
+            <div id="framerateGroup" class="segmented" data-value="30">
+              <button type="button" data-value="15">15</button>
+              <button type="button" data-value="30" class="active">30</button>
+              <button type="button" data-value="60">60</button>
+            </div>
+          </div>
         </div>
-        <button id="startShareBtn" class="btn btn-primary">Start Sharing Screen</button>
+        <button id="startShareBtn" class="btn btn-primary">🖥️ Iniciar Compartilhamento</button>
       </div>
 
       <div class="status-row">
-        <span id="status" class="status-badge">Initializing connection...</span>
-        <button id="copyLinkBtn" class="btn btn-ghost">🔗 Copy room link</button>
+        <span id="roomCodeDisplay" class="status-badge"></span>
+        <span id="status" class="status-badge">Inicializando conexão...</span>
+        <button id="copyLinkBtn" class="btn btn-ghost">🔗 Copiar link da sala</button>
       </div>
 
       <div id="videos" class="video-grid"></div>
