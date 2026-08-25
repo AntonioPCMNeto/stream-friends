@@ -22,6 +22,7 @@ const enterBtn = document.getElementById('enterBtn');
 
 const videosContainer = document.getElementById('videos');
 const startBtn = document.getElementById('startShareBtn');
+const shareOptions = document.getElementById('shareOptions');
 const resolutionGroup = document.getElementById('resolutionGroup');
 const framerateGroup = document.getElementById('framerateGroup');
 const statusText = document.getElementById('status');
@@ -53,11 +54,15 @@ const peerUsernames = new Map(); // socket id -> username
 const peerConnections = new Map(); // socket id -> RTCPeerConnection
 const tiles = new Map(); // tile key ('local' or socket id) -> tile <div>
 
-function toggleFullscreen(video) {
-  if (document.fullscreenElement === video) {
+// Fullscreens the tile wrapper, not the <video> itself — Chrome overlays
+// its own native play/pause/volume controls when a <video> element goes
+// fullscreen directly, which makes no sense for a live stream and hides
+// our own overlay. Fullscreening the wrapping div avoids that.
+function toggleFullscreen(el) {
+  if (document.fullscreenElement === el) {
     document.exitFullscreen();
   } else {
-    video.requestFullscreen();
+    el.requestFullscreen();
   }
 }
 
@@ -75,7 +80,7 @@ function addOrUpdateTile(key, stream, label, isLocal) {
     video.autoplay = true;
     video.playsInline = true;
     video.muted = true;
-    video.ondblclick = () => toggleFullscreen(video);
+    video.ondblclick = () => toggleFullscreen(tile);
 
     const overlay = document.createElement('div');
     overlay.className = 'tile-overlay';
@@ -102,7 +107,7 @@ function addOrUpdateTile(key, stream, label, isLocal) {
     fullscreenBtn.className = 'icon-btn';
     fullscreenBtn.title = 'Tela cheia';
     fullscreenBtn.textContent = '⛶';
-    fullscreenBtn.onclick = () => toggleFullscreen(video);
+    fullscreenBtn.onclick = () => toggleFullscreen(tile);
     actions.appendChild(fullscreenBtn);
 
     overlay.appendChild(labelEl);
@@ -264,6 +269,7 @@ function setSharingUI(sharing) {
   startBtn.textContent = sharing ? '⏹ Parar Compartilhamento' : '🖥️ Iniciar Compartilhamento';
   startBtn.classList.toggle('btn-danger', sharing);
   startBtn.classList.toggle('btn-primary', !sharing);
+  shareOptions.style.display = sharing ? 'none' : '';
 }
 
 // Stops our outgoing tracks. This also ends the corresponding remote track
@@ -298,8 +304,16 @@ startBtn.addEventListener('click', async () => {
 
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: videoConstraints,
-      audio: true
+      // systemAudio: 'exclude' stops whole-system audio from being offered
+      // when the user picks "Entire Screen" in the picker — sharing a tab
+      // or a single app window still captures just that source's audio.
+      audio: { systemAudio: 'exclude' }
     });
+
+    // Tells the encoder to favor smooth frame delivery over per-frame
+    // sharpness — the default ('detail') optimizes for static content and
+    // will drop frames under bandwidth pressure instead of losing quality.
+    stream.getVideoTracks()[0].contentHint = 'motion';
 
     localStream = stream;
     isSharing = true;

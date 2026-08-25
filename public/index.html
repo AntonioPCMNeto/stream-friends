@@ -88,6 +88,8 @@
 
     #enterBtn { width: 100%; }
 
+    #startShareBtn { margin-left: auto; }
+
     /* App screen */
     .toolbar {
       max-width: 1100px;
@@ -170,6 +172,13 @@
       background: #000;
       display: block;
     }
+    .tile:fullscreen {
+      width: 100vw;
+      height: 100vh;
+      max-width: 100vw;
+      aspect-ratio: auto;
+      border-radius: 0;
+    }
     .tile-overlay {
       position: absolute;
       left: 0; right: 0; bottom: 0;
@@ -226,7 +235,7 @@
 
     <div id="appScreen" style="display: none;">
       <div class="toolbar">
-        <div class="control-group">
+        <div id="shareOptions" class="control-group">
           <div>
             <div class="field-label">Resolução</div>
             <div id="resolutionGroup" class="segmented" data-value="1280x720">
