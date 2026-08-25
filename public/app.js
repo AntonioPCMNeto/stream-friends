@@ -92,15 +92,32 @@ function addOrUpdateTile(key, stream, label, isLocal) {
     actions.className = 'tile-actions';
 
     if (!isLocal) {
-      const unmuteBtn = document.createElement('button');
-      unmuteBtn.className = 'icon-btn';
-      unmuteBtn.title = 'Ativar som';
-      unmuteBtn.textContent = '🔊';
-      unmuteBtn.onclick = () => {
-        video.muted = false;
-        unmuteBtn.remove();
+      const muteBtn = document.createElement('button');
+      muteBtn.className = 'icon-btn';
+      muteBtn.title = 'Mudo';
+      muteBtn.textContent = '🔇';
+      muteBtn.onclick = () => {
+        video.muted = !video.muted;
+        muteBtn.textContent = video.muted ? '🔇' : '🔊';
+        muteBtn.title = video.muted ? 'Ativar som' : 'Mudo';
       };
-      actions.appendChild(unmuteBtn);
+      actions.appendChild(muteBtn);
+
+      const volumeSlider = document.createElement('input');
+      volumeSlider.type = 'range';
+      volumeSlider.className = 'volume-slider';
+      volumeSlider.min = '0';
+      volumeSlider.max = '1';
+      volumeSlider.step = '0.05';
+      volumeSlider.value = '1';
+      volumeSlider.title = 'Volume';
+      volumeSlider.oninput = () => {
+        video.volume = Number(volumeSlider.value);
+        video.muted = false;
+        muteBtn.textContent = '🔊';
+        muteBtn.title = 'Mudo';
+      };
+      actions.appendChild(volumeSlider);
     }
 
     const fullscreenBtn = document.createElement('button');
@@ -304,10 +321,10 @@ startBtn.addEventListener('click', async () => {
 
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: videoConstraints,
-      // systemAudio: 'exclude' stops whole-system audio from being offered
-      // when the user picks "Entire Screen" in the picker — sharing a tab
-      // or a single app window still captures just that source's audio.
-      audio: { systemAudio: 'exclude' }
+      // Sharing a tab or a single app window always captures just that
+      // source's audio; systemAudio only affects the "Entire Screen" case
+      // — 'include' (the default) lets it fall back to whole-system audio there.
+      audio: { systemAudio: 'include' }
     });
 
     // Tells the encoder to favor smooth frame delivery over per-frame
