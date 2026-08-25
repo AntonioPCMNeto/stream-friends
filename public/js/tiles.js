@@ -13,6 +13,22 @@ function toggleFullscreen(el) {
   }
 }
 
+// Switches directly to the next/previous tile's fullscreen — calling
+// requestFullscreen() on a different element while one is already
+// fullscreen swaps to it directly, no exitFullscreen() round-trip needed.
+// Wraps around; a no-op with a single tile (only element cycles to itself).
+function switchFullscreen(direction) {
+  const current = document.fullscreenElement;
+  if (!current) return;
+
+  const keys = [...tiles.keys()];
+  const currentIndex = keys.findIndex((key) => tiles.get(key) === current);
+  if (currentIndex === -1) return;
+
+  const nextIndex = (currentIndex + direction + keys.length) % keys.length;
+  tiles.get(keys[nextIndex]).requestFullscreen();
+}
+
 // One video tile per stream (your own preview plus one per remote streamer).
 // Tiles always start muted — Chrome blocks unmuted autoplay without a prior
 // user gesture, which a friend just opening the room link won't have given
@@ -96,10 +112,24 @@ export function addOrUpdateTile(key, stream, label, isLocal) {
     fullscreenBtn.onclick = () => toggleFullscreen(tile);
     actions.appendChild(fullscreenBtn);
 
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'tile-nav prev';
+    prevBtn.title = 'Stream anterior';
+    prevBtn.textContent = '◀';
+    prevBtn.onclick = () => switchFullscreen(-1);
+
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'tile-nav next';
+    nextBtn.title = 'Próximo stream';
+    nextBtn.textContent = '▶';
+    nextBtn.onclick = () => switchFullscreen(1);
+
     overlay.appendChild(labelEl);
     overlay.appendChild(actions);
     tile.appendChild(video);
     tile.appendChild(statsEl);
+    tile.appendChild(prevBtn);
+    tile.appendChild(nextBtn);
     tile.appendChild(overlay);
 
     videosContainer.appendChild(tile);

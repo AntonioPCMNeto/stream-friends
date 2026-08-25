@@ -25,53 +25,57 @@
     </div>
 
     <div id="appScreen" style="display: none;">
-      <div class="toolbar">
-        <div class="share-control">
-          <button id="startShareBtn" class="btn btn-primary">🖥️ Iniciar Compartilhamento</button>
-
-          <div id="sharePanel" class="share-panel hidden">
-            <div class="control-group">
-              <div>
-                <div class="field-label">Resolução</div>
-                <div id="resolutionGroup" class="segmented" data-value="1280x720">
-                  <button type="button" data-value="auto">Origem</button>
-                  <button type="button" data-value="640x360">360</button>
-                  <button type="button" data-value="854x480">480</button>
-                  <button type="button" data-value="1280x720" class="active">720</button>
-                  <button type="button" data-value="1920x1080">1080</button>
-                  <button type="button" data-value="2560x1440">1440</button>
-                </div>
-              </div>
-              <div>
-                <div class="field-label">Frame rate</div>
-                <div id="framerateGroup" class="segmented" data-value="30">
-                  <button type="button" data-value="15">15</button>
-                  <button type="button" data-value="30" class="active">30</button>
-                  <button type="button" data-value="60">60</button>
-                </div>
-              </div>
-              <div>
-                <div class="field-label">Bitrate</div>
-                <div id="bitrateGroup" class="segmented" data-value="2500">
-                  <button type="button" data-value="">Auto</button>
-                  <button type="button" data-value="1000">1 Mbps</button>
-                  <button type="button" data-value="2500" class="active">2.5 Mbps</button>
-                  <button type="button" data-value="5000">5 Mbps</button>
-                  <button type="button" data-value="8000">8 Mbps</button>
-                  <button type="button" data-value="12000">12 Mbps</button>
-                </div>
-              </div>
-            </div>
-            <button id="confirmShareBtn" class="btn btn-primary">🖥️ Compartilhar</button>
-          </div>
+      <div class="room-bar">
+        <div class="room-bar-left">
+          <span id="connectionDot" class="connection-dot disconnected" title="Conectando..."></span>
+          <span id="roomCodeDisplay" class="room-code"></span>
         </div>
-      </div>
 
-      <div class="status-row">
-        <span id="roomCodeDisplay" class="status-badge"></span>
-        <span id="status" class="status-badge">Inicializando conexão...</span>
-        <button id="copyLinkBtn" class="btn btn-ghost">🔗 Copiar link da sala</button>
-        <button id="leaveRoomBtn" class="btn btn-ghost">🚪 Sair da Sala</button>
+        <div class="room-bar-right">
+          <button id="copyLinkBtn" class="btn btn-ghost">🔗 Copiar link</button>
+
+          <div class="share-control">
+            <button id="startShareBtn" class="btn btn-primary">🖥️ Iniciar Compartilhamento</button>
+
+            <div id="sharePanel" class="share-panel hidden">
+              <div class="control-group">
+                <div>
+                  <div class="field-label">Resolução</div>
+                  <div id="resolutionGroup" class="segmented" data-value="1280x720">
+                    <button type="button" data-value="auto">Origem</button>
+                    <button type="button" data-value="640x360">360</button>
+                    <button type="button" data-value="854x480">480</button>
+                    <button type="button" data-value="1280x720" class="active">720</button>
+                    <button type="button" data-value="1920x1080">1080</button>
+                    <button type="button" data-value="2560x1440">1440</button>
+                  </div>
+                </div>
+                <div>
+                  <div class="field-label">Frame rate</div>
+                  <div id="framerateGroup" class="segmented" data-value="30">
+                    <button type="button" data-value="15">15</button>
+                    <button type="button" data-value="30" class="active">30</button>
+                    <button type="button" data-value="60">60</button>
+                  </div>
+                </div>
+                <div>
+                  <div class="field-label">Bitrate</div>
+                  <div id="bitrateGroup" class="segmented" data-value="2500">
+                    <button type="button" data-value="">Auto</button>
+                    <button type="button" data-value="1000">1 Mbps</button>
+                    <button type="button" data-value="2500" class="active">2.5 Mbps</button>
+                    <button type="button" data-value="5000">5 Mbps</button>
+                    <button type="button" data-value="8000">8 Mbps</button>
+                    <button type="button" data-value="12000">12 Mbps</button>
+                  </div>
+                </div>
+              </div>
+              <button id="confirmShareBtn" class="btn btn-primary">🖥️ Compartilhar</button>
+            </div>
+          </div>
+
+          <button id="leaveRoomBtn" class="btn btn-ghost">🚪 Sair da Sala</button>
+        </div>
       </div>
 
       <div id="videos" class="video-grid"></div>

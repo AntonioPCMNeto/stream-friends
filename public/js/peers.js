@@ -3,8 +3,6 @@ import { state } from './state.js';
 import { addOrUpdateTile, removeTile, updateTileStats } from './tiles.js';
 import { showToast } from './toast.js';
 
-const statusText = document.getElementById('status');
-
 const peerConnections = new Map(); // socket id -> RTCPeerConnection
 let socket = null;
 
@@ -24,7 +22,6 @@ function getOrCreatePeerConnection(peerId) {
   pc.ontrack = (event) => {
     const label = state.peerUsernames.get(peerId) || `Usuário ${peerId.slice(0, 5)}`;
     addOrUpdateTile(peerId, event.streams[0], label, false /* isLocal */);
-    statusText.innerText = 'Visualizando tela(s) remota(s).';
 
     event.track.onended = () => removeTile(peerId);
   };

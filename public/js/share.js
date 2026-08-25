@@ -1,6 +1,7 @@
 import { state } from './state.js';
 import { addOrUpdateTile, removeTile } from './tiles.js';
 import { callPeer, updateBitrate } from './peers.js';
+import { showToast } from './toast.js';
 
 const startBtn = document.getElementById('startShareBtn');
 const shareControl = document.querySelector('.share-control');
@@ -9,7 +10,6 @@ const confirmShareBtn = document.getElementById('confirmShareBtn');
 const resolutionGroup = document.getElementById('resolutionGroup');
 const framerateGroup = document.getElementById('framerateGroup');
 const bitrateGroup = document.getElementById('bitrateGroup');
-const statusText = document.getElementById('status');
 
 // Wires a row of segmented buttons: clicking one marks it active and
 // updates the group's data-value, which the Start button reads later.
@@ -36,20 +36,21 @@ function closePanel() { sharePanel.classList.add('hidden'); }
 // on every peer's connection, so their tile disappears without extra signaling.
 // Safe to call even when not currently sharing (e.g. on room exit).
 export function stopSharing() {
+  const wasSharing = !!state.localStream;
   if (state.localStream) {
     state.localStream.getTracks().forEach((track) => track.stop());
   }
   state.isSharing = false;
   state.localStream = null;
   removeTile('local');
-  statusText.innerText = 'Compartilhamento de tela interrompido.';
   setSharingUI(false);
+  if (wasSharing) showToast('Compartilhamento de tela interrompido.');
 }
 
 // HOST SIDE: capture screen and call everyone in the room
 async function startSharing() {
   if (!navigator.mediaDevices?.getDisplayMedia) {
-    statusText.innerText = 'Compartilhamento de tela não é suportado neste navegador/dispositivo.';
+    showToast('Compartilhamento de tela não é suportado neste navegador/dispositivo.', 'error');
     return;
   }
 
@@ -87,7 +88,7 @@ async function startSharing() {
     state.localStream = stream;
     state.isSharing = true;
     addOrUpdateTile('local', stream, `Você (${state.myUsername})`, true /* isLocal */);
-    statusText.innerText = 'Compartilhando sua tela...';
+    showToast('Você começou a compartilhar sua tela.');
     setSharingUI(true);
 
     // Call everyone already known in the room
@@ -100,11 +101,11 @@ async function startSharing() {
     // getDisplayMedia doesn't distinguish "user clicked Cancel" from "user
     // denied permission" — both surface as NotAllowedError.
     if (err.name === 'NotAllowedError') {
-      statusText.innerText = 'Permissão negada ou compartilhamento cancelado.';
+      showToast('Permissão negada ou compartilhamento cancelado.', 'error');
     } else if (err.name === 'NotSupportedError' || err.name === 'NotFoundError') {
-      statusText.innerText = 'Compartilhamento de tela não é suportado neste navegador/dispositivo.';
+      showToast('Compartilhamento de tela não é suportado neste navegador/dispositivo.', 'error');
     } else {
-      statusText.innerText = 'Erro ao capturar a tela.';
+      showToast('Erro ao capturar a tela.', 'error');
     }
   }
 }

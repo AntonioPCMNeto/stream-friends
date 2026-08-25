@@ -11,7 +11,7 @@ const enterBtn = document.getElementById('enterBtn');
 const roomCodeDisplay = document.getElementById('roomCodeDisplay');
 const copyLinkBtn = document.getElementById('copyLinkBtn');
 const leaveRoomBtn = document.getElementById('leaveRoomBtn');
-const statusText = document.getElementById('status');
+const connectionDot = document.getElementById('connectionDot');
 
 let socket = null;
 
@@ -112,9 +112,17 @@ export function initLobby(theSocket) {
   });
 
   socket.on('connect', () => {
-    statusText.innerText = 'Conectado. Compartilhe o link da sala para convidar outras pessoas.';
+    connectionDot.classList.add('connected');
+    connectionDot.classList.remove('disconnected');
+    connectionDot.title = 'Conectado';
     if (state.hasEntered) {
       socket.emit('join-room', { roomId: state.roomId, username: state.myUsername });
     }
+  });
+
+  socket.on('disconnect', () => {
+    connectionDot.classList.remove('connected');
+    connectionDot.classList.add('disconnected');
+    connectionDot.title = 'Desconectado';
   });
 }
