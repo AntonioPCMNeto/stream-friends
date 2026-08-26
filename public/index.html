@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://stream-friends.onrender.com wss://stream-friends.onrender.com;">
   <title>Scrima aí</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
@@ -25,7 +26,7 @@
       <button id="enterBtn" class="btn btn-primary">Entrar na Sala</button>
     </div>
 
-    <div id="appScreen" style="display: none;">
+    <div id="appScreen" class="hidden">
       <div class="room-bar">
         <div class="room-bar-left">
           <span id="connectionDot" class="connection-dot disconnected" title="Conectando..."></span>
@@ -100,8 +101,10 @@
 
   <div id="toastContainer" class="toast-container"></div>
 
-  <!-- Socket.io client; js/main.js (ES module) does raw WebRTC signaling over it -->
-  <script src="/socket.io/socket.io.js"></script>
+  <!-- Bundled locally (not served by a same-origin server, since this page
+       loads via file:// inside Electron) — js/main.js connects it straight
+       to the deployed signaling server. -->
+  <script src="vendor/socket.io.min.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

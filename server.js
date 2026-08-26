@@ -4,7 +4,16 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+// The web app talks to this server same-origin, so CORS never applies to
+// it — this only matters for the Electron client, which loads its page via
+// file:// (no origin to be "same" with) and must connect explicitly. There
+// are no cookies/auth here, just ephemeral in-memory room state, so a
+// wide-open origin doesn't expose anything a same-origin policy would
+// otherwise protect.
+const io = new Server(server, {
+  cors: { origin: '*' },
+});
 
 // Serve static frontend files
 app.use(express.static('public'));

@@ -81,8 +81,8 @@ function enterRoom() {
   roomCodeDisplay.textContent = state.roomId;
   refreshParticipants();
 
-  lobby.style.display = 'none';
-  appScreen.style.display = '';
+  lobby.classList.add('hidden');
+  appScreen.classList.remove('hidden');
 
   if (socket.connected) {
     socket.emit('join-room', { roomId: state.roomId, username: state.myUsername });
@@ -109,8 +109,8 @@ function leaveRoom() {
   url.searchParams.delete('room');
   window.history.replaceState({}, '', url);
 
-  appScreen.style.display = 'none';
-  lobby.style.display = '';
+  appScreen.classList.add('hidden');
+  lobby.classList.remove('hidden');
   lobbyError.textContent = '';
   roomCodeInput.value = '';
   applyReturningUserUX();
