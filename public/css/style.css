@@ -22,10 +22,16 @@ body {
 }
 
 .app-header {
-  padding: 20px 32px;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  padding: 28px 32px 20px;
+  text-align: center;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  background: linear-gradient(135deg, var(--text) 40%, var(--accent) 120%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 2px 24px rgba(99, 102, 241, 0.35);
 }
 
 main {
@@ -369,6 +375,16 @@ main {
   accent-color: var(--accent);
   cursor: pointer;
   align-self: center;
+}
+
+.app-footer {
+  text-align: center;
+  padding: 24px 32px 32px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  opacity: 0.7;
 }
 
 /* Toasts */
