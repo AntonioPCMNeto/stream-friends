@@ -1,6 +1,7 @@
 import { state } from './state.js';
 import { stopSharing } from './share.js';
 import { closeAllPeerConnections } from './peers.js';
+import { refreshParticipants } from './participants.js';
 
 const lobby = document.getElementById('lobby');
 const appScreen = document.getElementById('appScreen');
@@ -9,6 +10,7 @@ const roomCodeInput = document.getElementById('roomCodeInput');
 const lobbyError = document.getElementById('lobbyError');
 const enterBtn = document.getElementById('enterBtn');
 const roomCodeDisplay = document.getElementById('roomCodeDisplay');
+const copyRoomCodeBtn = document.getElementById('copyRoomCodeBtn');
 const copyLinkBtn = document.getElementById('copyLinkBtn');
 const leaveRoomBtn = document.getElementById('leaveRoomBtn');
 const connectionDot = document.getElementById('connectionDot');
@@ -57,7 +59,8 @@ function enterRoom() {
   url.searchParams.set('room', state.roomId);
   window.history.replaceState({}, '', url);
   state.currentRoomUrl = url.href;
-  roomCodeDisplay.textContent = `Código da Sala: ${state.roomId}`;
+  roomCodeDisplay.textContent = state.roomId;
+  refreshParticipants();
 
   lobby.style.display = 'none';
   appScreen.style.display = '';
@@ -80,6 +83,8 @@ function leaveRoom() {
   state.currentRoomUrl = null;
   state.knownPeers.clear();
   state.peerUsernames.clear();
+  state.sharingPeers.clear();
+  refreshParticipants();
 
   const url = new URL(window.location.href);
   url.searchParams.delete('room');
@@ -109,6 +114,13 @@ export function initLobby(theSocket) {
     const original = copyLinkBtn.textContent;
     copyLinkBtn.textContent = '✅ Copiado!';
     setTimeout(() => { copyLinkBtn.textContent = original; }, 1500);
+  });
+
+  copyRoomCodeBtn.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(state.roomId);
+    const original = copyRoomCodeBtn.textContent;
+    copyRoomCodeBtn.textContent = '✅';
+    setTimeout(() => { copyRoomCodeBtn.textContent = original; }, 1200);
   });
 
   socket.on('connect', () => {

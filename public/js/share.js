@@ -1,7 +1,8 @@
 import { state } from './state.js';
 import { addOrUpdateTile, removeTile } from './tiles.js';
-import { callPeer, updateBitrate } from './peers.js';
+import { callPeer, updateBitrate, announceSharingStatus } from './peers.js';
 import { showToast } from './toast.js';
+import { refreshParticipants } from './participants.js';
 
 const startBtn = document.getElementById('startShareBtn');
 const shareControl = document.querySelector('.share-control');
@@ -44,7 +45,11 @@ export function stopSharing() {
   state.localStream = null;
   removeTile('local');
   setSharingUI(false);
-  if (wasSharing) showToast('Compartilhamento de tela interrompido.');
+  if (wasSharing) {
+    showToast('Compartilhamento de tela interrompido.');
+    announceSharingStatus(false);
+    refreshParticipants();
+  }
 }
 
 // HOST SIDE: capture screen and call everyone in the room
@@ -90,6 +95,8 @@ async function startSharing() {
     addOrUpdateTile('local', stream, `Você (${state.myUsername})`, true /* isLocal */);
     showToast('Você começou a compartilhar sua tela.');
     setSharingUI(true);
+    announceSharingStatus(true);
+    refreshParticipants();
 
     // Call everyone already known in the room
     state.knownPeers.forEach(callPeer);

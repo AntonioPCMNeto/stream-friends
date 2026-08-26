@@ -28,10 +28,23 @@
       <div class="room-bar">
         <div class="room-bar-left">
           <span id="connectionDot" class="connection-dot disconnected" title="Conectando..."></span>
-          <span id="roomCodeDisplay" class="room-code"></span>
+          <span class="room-code-wrap">
+            <span class="room-code-label">Sala</span>
+            <span id="roomCodeDisplay" class="room-code"></span>
+            <button id="copyRoomCodeBtn" class="copy-code-btn" title="Copiar código da sala">📋</button>
+          </span>
         </div>
 
         <div class="room-bar-right">
+          <div class="participants-control">
+            <button id="participantsBtn" class="btn btn-ghost">👥 <span id="participantsCount">0</span></button>
+
+            <div id="participantsPanel" class="participants-panel hidden">
+              <div class="field-label">Participantes</div>
+              <div id="participantsList" class="participants-list"></div>
+            </div>
+          </div>
+
           <button id="copyLinkBtn" class="btn btn-ghost">🔗 Copiar link</button>
 
           <div class="share-control">

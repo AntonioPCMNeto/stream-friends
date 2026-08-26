@@ -2,6 +2,7 @@ import { iceServers } from './iceServers.js';
 import { state } from './state.js';
 import { addOrUpdateTile, removeTile, updateTileStats } from './tiles.js';
 import { showToast } from './toast.js';
+import { refreshParticipants } from './participants.js';
 
 const peerConnections = new Map(); // socket id -> RTCPeerConnection
 let socket = null;
@@ -40,6 +41,12 @@ function closePeerConnection(peerId) {
   removeTile(peerId);
 }
 
+// Tells the server (and, through it, everyone else in the room) whether
+// we're currently sharing our screen.
+export function announceSharingStatus(isSharing) {
+  socket.emit('share-status', { isSharing });
+}
+
 export function closeAllPeerConnections() {
   Array.from(peerConnections.keys()).forEach(closePeerConnection);
 }
@@ -63,17 +70,20 @@ export function updateBitrate() {
   });
 }
 
-// Prefers VP9 over the other offered video codecs — better compression of
-// the flat regions and sharp edges typical of screen content than the
-// default VP8, at the same bitrate. Falls back silently where unsupported.
-function preferVp9(pc, sender) {
+// Prefers H.264 over the other offered video codecs. Unlike VP8/VP9, H.264
+// has near-universal hardware encode/decode support across GPUs (Intel
+// QuickSync, NVENC, AMD VCE), which keeps CPU usage down — important here
+// since Chrome runs one independent encoder per peer connection, so sharing
+// to several viewers multiplies encode cost per viewer regardless of codec.
+// Falls back silently where unsupported.
+function preferH264(pc, sender) {
   const transceiver = pc.getTransceivers().find((t) => t.sender === sender);
   if (!transceiver?.setCodecPreferences) return;
   const capabilities = RTCRtpSender.getCapabilities('video');
   if (!capabilities) return;
-  const vp9 = capabilities.codecs.filter((c) => c.mimeType === 'video/VP9');
-  const others = capabilities.codecs.filter((c) => c.mimeType !== 'video/VP9');
-  transceiver.setCodecPreferences([...vp9, ...others]);
+  const h264 = capabilities.codecs.filter((c) => c.mimeType === 'video/H264');
+  const others = capabilities.codecs.filter((c) => c.mimeType !== 'video/H264');
+  transceiver.setCodecPreferences([...h264, ...others]);
 }
 
 // key ('local' or a remote peer id) -> { bytes, ts } from the last sample,
@@ -133,7 +143,7 @@ export async function callPeer(peerId) {
     const sender = pc.addTrack(track, state.localStream);
     if (track.kind === 'video') {
       applyBitrateToSender(sender);
-      preferVp9(pc, sender);
+      preferH264(pc, sender);
     }
   });
   const offer = await pc.createOffer();
@@ -150,11 +160,13 @@ export function initPeerSignaling(theSocket) {
   // toasts) — this is a one-time dump of everyone already present, not
   // someone actively joining.
   socket.on('existing-peers', (peers) => {
-    peers.forEach(({ id, username }) => {
+    peers.forEach(({ id, username, sharing }) => {
       state.knownPeers.add(id);
       state.peerUsernames.set(id, username);
+      if (sharing) state.sharingPeers.add(id);
     });
     if (state.isSharing) peers.forEach(({ id }) => callPeer(id));
+    refreshParticipants();
   });
 
   // A peer joined after us — call them if we're already sharing
@@ -163,14 +175,23 @@ export function initPeerSignaling(theSocket) {
     state.peerUsernames.set(id, username);
     if (state.isSharing) callPeer(id);
     showToast(`${username} entrou na sala`);
+    refreshParticipants();
   });
 
   socket.on('peer-left', (peerId) => {
     const username = state.peerUsernames.get(peerId) || 'Alguém';
     state.knownPeers.delete(peerId);
     state.peerUsernames.delete(peerId);
+    state.sharingPeers.delete(peerId);
     closePeerConnection(peerId);
     showToast(`${username} saiu da sala`);
+    refreshParticipants();
+  });
+
+  // Someone else started or stopped sharing their screen.
+  socket.on('peer-share-status', ({ id, isSharing }) => {
+    if (isSharing) state.sharingPeers.add(id); else state.sharingPeers.delete(id);
+    refreshParticipants();
   });
 
   // Handle incoming offer/answer/ICE-candidate messages relayed by the server

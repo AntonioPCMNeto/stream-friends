@@ -10,4 +10,5 @@ export const state = {
   currentRoomUrl: null,
   knownPeers: new Set(), // remote socket ids
   peerUsernames: new Map(), // socket id -> username
+  sharingPeers: new Set(), // socket ids currently sharing their screen
 };

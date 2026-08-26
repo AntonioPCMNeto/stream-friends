@@ -9,7 +9,7 @@ const io = new Server(server);
 // Serve static frontend files
 app.use(express.static('public'));
 
-// roomId -> Map<socket.id, username>
+// roomId -> Map<socket.id, { username, sharing }>
 const rooms = new Map();
 
 io.on('connection', (socket) => {
@@ -23,13 +23,14 @@ io.on('connection', (socket) => {
     if (!rooms.has(roomId)) rooms.set(roomId, new Map());
     const room = rooms.get(roomId);
 
-    // Tell the newly joined peer who is already in the room
+    // Tell the newly joined peer who is already in the room, including
+    // whether each of them is currently sharing.
     socket.emit(
       'existing-peers',
-      Array.from(room, ([id, name]) => ({ id, username: name }))
+      Array.from(room, ([id, info]) => ({ id, username: info.username, sharing: info.sharing }))
     );
 
-    room.set(socket.id, username);
+    room.set(socket.id, { username, sharing: false });
 
     // Announce the new peer to everyone already in the room
     socket.to(roomId).emit('viewer-joined', { id: socket.id, username });
@@ -40,6 +41,16 @@ io.on('connection', (socket) => {
   // so io.to(to) reaches exactly that one client.
   socket.on('signal', ({ to, data }) => {
     io.to(to).emit('signal', { from: socket.id, data });
+  });
+
+  socket.on('share-status', ({ isSharing }) => {
+    const { roomId } = socket.data;
+    const room = roomId && rooms.get(roomId);
+    const info = room && room.get(socket.id);
+    if (!info) return;
+
+    info.sharing = isSharing;
+    socket.to(roomId).emit('peer-share-status', { id: socket.id, isSharing });
   });
 
   socket.on('disconnect', () => {
