@@ -74,6 +74,13 @@ main {
 }
 .card h2 { margin: 0 0 20px; font-size: 18px; }
 
+.welcome-back {
+  margin: -8px 0 20px;
+  font-size: 13px;
+  color: var(--accent-hover);
+}
+.welcome-back.hidden { display: none; }
+
 .field { display: block; margin-bottom: 16px; text-align: left; }
 .field span { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
 .field input {

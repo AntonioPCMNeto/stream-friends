@@ -8,6 +8,7 @@ const appScreen = document.getElementById('appScreen');
 const usernameInput = document.getElementById('usernameInput');
 const roomCodeInput = document.getElementById('roomCodeInput');
 const lobbyError = document.getElementById('lobbyError');
+const welcomeBack = document.getElementById('welcomeBack');
 const enterBtn = document.getElementById('enterBtn');
 const roomCodeDisplay = document.getElementById('roomCodeDisplay');
 const copyRoomCodeBtn = document.getElementById('copyRoomCodeBtn');
@@ -41,7 +42,24 @@ function saveUsername(username) {
   }
 }
 
-usernameInput.value = loadSavedUsername();
+// A returning user only needs to type the room code — jump focus straight
+// there and let them know we remembered their name. A first-time visitor
+// still needs to pick a name first.
+function applyReturningUserUX() {
+  const savedUsername = loadSavedUsername();
+  usernameInput.value = savedUsername;
+
+  if (savedUsername) {
+    welcomeBack.textContent = `Bem-vindo de volta, ${savedUsername}! 👋`;
+    welcomeBack.classList.remove('hidden');
+    roomCodeInput.focus();
+  } else {
+    welcomeBack.classList.add('hidden');
+    usernameInput.focus();
+  }
+}
+
+applyReturningUserUX();
 
 function enterRoom() {
   const username = usernameInput.value.trim();
@@ -94,6 +112,7 @@ function leaveRoom() {
   lobby.style.display = '';
   lobbyError.textContent = '';
   roomCodeInput.value = '';
+  applyReturningUserUX();
 
   socket.disconnect();
   socket.connect();
