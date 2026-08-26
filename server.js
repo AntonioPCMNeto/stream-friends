@@ -12,10 +12,23 @@ app.use(express.static('public'));
 // roomId -> Map<socket.id, { username, sharing }>
 const rooms = new Map();
 
+const MAX_ROOM_ID_LENGTH = 64;
+const MAX_USERNAME_LENGTH = 50;
+
+function isValidRoomId(roomId) {
+  return typeof roomId === 'string' && roomId.length > 0 && roomId.length <= MAX_ROOM_ID_LENGTH;
+}
+
+function isValidUsername(username) {
+  return typeof username === 'string' && username.trim().length > 0 && username.length <= MAX_USERNAME_LENGTH;
+}
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('join-room', ({ roomId, username }) => {
+    if (!isValidRoomId(roomId) || !isValidUsername(username)) return;
+
     socket.join(roomId);
     socket.data.roomId = roomId;
     socket.data.username = username;
@@ -38,8 +51,13 @@ io.on('connection', (socket) => {
 
   // Relay WebRTC offer/answer/ICE-candidate messages between two specific
   // peers. Every socket implicitly has its own room named after its id,
-  // so io.to(to) reaches exactly that one client.
+  // so io.to(to) reaches exactly that one client — but only after we
+  // confirm `to` is actually a peer in the sender's own room, otherwise
+  // any client could push fabricated signals at any other socket on the
+  // server regardless of room membership.
   socket.on('signal', ({ to, data }) => {
+    const targetSocket = io.sockets.sockets.get(to);
+    if (!targetSocket || !socket.data.roomId || targetSocket.data.roomId !== socket.data.roomId) return;
     io.to(to).emit('signal', { from: socket.id, data });
   });
 
@@ -49,8 +67,8 @@ io.on('connection', (socket) => {
     const info = room && room.get(socket.id);
     if (!info) return;
 
-    info.sharing = isSharing;
-    socket.to(roomId).emit('peer-share-status', { id: socket.id, isSharing });
+    info.sharing = Boolean(isSharing);
+    socket.to(roomId).emit('peer-share-status', { id: socket.id, isSharing: info.sharing });
   });
 
   socket.on('disconnect', () => {
@@ -69,3 +87,5 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
+
+module.exports = { app, server, io };

@@ -19,6 +19,15 @@ function getOrCreatePeerConnection(peerId) {
     }
   };
 
+  // 'disconnected' is often transient (brief network hiccup, ICE re-checks
+  // on its own) — only 'failed' is terminal enough to be worth surfacing.
+  pc.oniceconnectionstatechange = () => {
+    if (pc.iceConnectionState === 'failed') {
+      const label = state.peerUsernames.get(peerId) || `Usuário ${peerId.slice(0, 5)}`;
+      showToast(`Falha na conexão com ${label}.`, 'error');
+    }
+  };
+
   // RECEIVER SIDE: a remote track means someone is sending us their screen
   pc.ontrack = (event) => {
     const label = state.peerUsernames.get(peerId) || `Usuário ${peerId.slice(0, 5)}`;

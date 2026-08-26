@@ -2,6 +2,7 @@ import { state } from './state.js';
 import { stopSharing } from './share.js';
 import { closeAllPeerConnections } from './peers.js';
 import { refreshParticipants } from './participants.js';
+import { showToast } from './toast.js';
 
 const lobby = document.getElementById('lobby');
 const appScreen = document.getElementById('appScreen');
@@ -142,18 +143,33 @@ export function initLobby(theSocket) {
     setTimeout(() => { copyRoomCodeBtn.textContent = original; }, 1200);
   });
 
+  let hasConnectedBefore = false;
+
   socket.on('connect', () => {
     connectionDot.classList.add('connected');
     connectionDot.classList.remove('disconnected');
     connectionDot.title = 'Conectado';
     if (state.hasEntered) {
+      // A reconnect after a dropped connection leaves stale peer state and
+      // dead RTCPeerConnections behind (the server never told us who left
+      // while we were offline) — clear them so the fresh existing-peers
+      // response rebuilds everyone from scratch instead of layering on top
+      // of ghosts.
+      closeAllPeerConnections();
+      state.knownPeers.clear();
+      state.peerUsernames.clear();
+      state.sharingPeers.clear();
+      refreshParticipants();
       socket.emit('join-room', { roomId: state.roomId, username: state.myUsername });
+      if (hasConnectedBefore) showToast('Reconectado à sala.');
     }
+    hasConnectedBefore = true;
   });
 
   socket.on('disconnect', () => {
     connectionDot.classList.remove('connected');
     connectionDot.classList.add('disconnected');
     connectionDot.title = 'Desconectado';
+    if (state.hasEntered) showToast('Conexão perdida. Reconectando...', 'error');
   });
 }

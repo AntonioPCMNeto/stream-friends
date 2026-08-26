@@ -61,11 +61,14 @@ export function addOrUpdateTile(key, stream, label, isLocal) {
       const muteBtn = document.createElement('button');
       muteBtn.className = 'icon-btn';
       muteBtn.title = 'Mudo';
+      muteBtn.setAttribute('aria-label', 'Mudo');
       muteBtn.textContent = '🔇';
       muteBtn.onclick = () => {
         video.muted = !video.muted;
+        const label = video.muted ? 'Ativar som' : 'Mudo';
         muteBtn.textContent = video.muted ? '🔇' : '🔊';
-        muteBtn.title = video.muted ? 'Ativar som' : 'Mudo';
+        muteBtn.title = label;
+        muteBtn.setAttribute('aria-label', label);
       };
       actions.appendChild(muteBtn);
 
@@ -77,6 +80,7 @@ export function addOrUpdateTile(key, stream, label, isLocal) {
       volumeSlider.step = '0.05';
       volumeSlider.value = '1';
       volumeSlider.title = 'Volume';
+      volumeSlider.setAttribute('aria-label', 'Volume');
       volumeSlider.oninput = () => {
         video.volume = Number(volumeSlider.value);
         video.muted = false;
@@ -90,6 +94,7 @@ export function addOrUpdateTile(key, stream, label, isLocal) {
       const pipBtn = document.createElement('button');
       pipBtn.className = 'icon-btn';
       pipBtn.title = 'Picture-in-Picture';
+      pipBtn.setAttribute('aria-label', 'Picture-in-Picture');
       pipBtn.textContent = '🗗';
       pipBtn.onclick = async () => {
         try {
@@ -108,6 +113,7 @@ export function addOrUpdateTile(key, stream, label, isLocal) {
     const fullscreenBtn = document.createElement('button');
     fullscreenBtn.className = 'icon-btn';
     fullscreenBtn.title = 'Tela cheia';
+    fullscreenBtn.setAttribute('aria-label', 'Tela cheia');
     fullscreenBtn.textContent = '⛶';
     fullscreenBtn.onclick = () => toggleFullscreen(tile);
     actions.appendChild(fullscreenBtn);
@@ -115,12 +121,14 @@ export function addOrUpdateTile(key, stream, label, isLocal) {
     const prevBtn = document.createElement('button');
     prevBtn.className = 'tile-nav prev';
     prevBtn.title = 'Stream anterior';
+    prevBtn.setAttribute('aria-label', 'Stream anterior');
     prevBtn.textContent = '◀';
     prevBtn.onclick = () => switchFullscreen(-1);
 
     const nextBtn = document.createElement('button');
     nextBtn.className = 'tile-nav next';
     nextBtn.title = 'Próximo stream';
+    nextBtn.setAttribute('aria-label', 'Próximo stream');
     nextBtn.textContent = '▶';
     nextBtn.onclick = () => switchFullscreen(1);
 

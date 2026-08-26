@@ -32,7 +32,7 @@
           <span class="room-code-wrap">
             <span class="room-code-label">Sala</span>
             <span id="roomCodeDisplay" class="room-code"></span>
-            <button id="copyRoomCodeBtn" class="copy-code-btn" title="Copiar código da sala">📋</button>
+            <button id="copyRoomCodeBtn" class="copy-code-btn" title="Copiar código da sala" aria-label="Copiar código da sala">📋</button>
           </span>
         </div>
 
@@ -55,32 +55,32 @@
               <div class="control-group">
                 <div>
                   <div class="field-label">Resolução</div>
-                  <div id="resolutionGroup" class="segmented" data-value="1280x720">
-                    <button type="button" data-value="auto">Origem</button>
-                    <button type="button" data-value="640x360">360</button>
-                    <button type="button" data-value="854x480">480</button>
-                    <button type="button" data-value="1280x720" class="active">720</button>
-                    <button type="button" data-value="1920x1080">1080</button>
-                    <button type="button" data-value="2560x1440">1440</button>
+                  <div id="resolutionGroup" class="segmented" data-value="1280x720" role="group" aria-label="Resolução">
+                    <button type="button" data-value="auto" aria-pressed="false">Origem</button>
+                    <button type="button" data-value="640x360" aria-pressed="false">360</button>
+                    <button type="button" data-value="854x480" aria-pressed="false">480</button>
+                    <button type="button" data-value="1280x720" class="active" aria-pressed="true">720</button>
+                    <button type="button" data-value="1920x1080" aria-pressed="false">1080</button>
+                    <button type="button" data-value="2560x1440" aria-pressed="false">1440</button>
                   </div>
                 </div>
                 <div>
                   <div class="field-label">Frame rate</div>
-                  <div id="framerateGroup" class="segmented" data-value="30">
-                    <button type="button" data-value="15">15</button>
-                    <button type="button" data-value="30" class="active">30</button>
-                    <button type="button" data-value="60">60</button>
+                  <div id="framerateGroup" class="segmented" data-value="30" role="group" aria-label="Frame rate">
+                    <button type="button" data-value="15" aria-pressed="false">15</button>
+                    <button type="button" data-value="30" class="active" aria-pressed="true">30</button>
+                    <button type="button" data-value="60" aria-pressed="false">60</button>
                   </div>
                 </div>
                 <div>
                   <div class="field-label">Bitrate</div>
-                  <div id="bitrateGroup" class="segmented" data-value="2500">
-                    <button type="button" data-value="">Auto</button>
-                    <button type="button" data-value="1000">1 Mbps</button>
-                    <button type="button" data-value="2500" class="active">2.5 Mbps</button>
-                    <button type="button" data-value="5000">5 Mbps</button>
-                    <button type="button" data-value="8000">8 Mbps</button>
-                    <button type="button" data-value="12000">12 Mbps</button>
+                  <div id="bitrateGroup" class="segmented" data-value="2500" role="group" aria-label="Bitrate">
+                    <button type="button" data-value="" aria-pressed="false">Auto</button>
+                    <button type="button" data-value="1000" aria-pressed="false">1 Mbps</button>
+                    <button type="button" data-value="2500" class="active" aria-pressed="true">2.5 Mbps</button>
+                    <button type="button" data-value="5000" aria-pressed="false">5 Mbps</button>
+                    <button type="button" data-value="8000" aria-pressed="false">8 Mbps</button>
+                    <button type="button" data-value="12000" aria-pressed="false">12 Mbps</button>
                   </div>
                 </div>
               </div>

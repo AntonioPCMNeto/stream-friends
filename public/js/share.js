@@ -17,8 +17,12 @@ const bitrateGroup = document.getElementById('bitrateGroup');
 function initSegmented(group) {
   group.querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', () => {
-      group.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
+      group.querySelectorAll('button').forEach((b) => {
+        b.classList.remove('active');
+        b.setAttribute('aria-pressed', 'false');
+      });
       btn.classList.add('active');
+      btn.setAttribute('aria-pressed', 'true');
       group.dataset.value = btn.dataset.value;
     });
   });
