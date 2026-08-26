@@ -60,21 +60,29 @@ export function closeAllPeerConnections() {
   Array.from(peerConnections.keys()).forEach(closePeerConnection);
 }
 
-// Caps a video sender's outgoing bitrate at state.videoBitrateKbps
-// (falsy = no cap, let the browser/network decide).
-function applyBitrateToSender(sender) {
+// Caps a video sender's outgoing bitrate/framerate (state.videoBitrateKbps /
+// state.videoFramerateFps — falsy bitrate means no cap) and tells the
+// encoder to protect framerate over resolution/sharpness when bandwidth
+// gets tight. Screen-share content (games, video, scrolling) is usually
+// motion-heavy, so a steady framerate reads as smoother than a sharper but
+// stuttery picture — the default 'balanced' preference can still sacrifice
+// framerate to preserve resolution, which is the wrong tradeoff here.
+function applyEncodingParams(sender) {
   const params = sender.getParameters();
   if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
   params.encodings[0].maxBitrate = state.videoBitrateKbps ? state.videoBitrateKbps * 1000 : undefined;
-  sender.setParameters(params).catch((err) => console.error('Failed to set bitrate:', err));
+  params.encodings[0].maxFramerate = state.videoFramerateFps || undefined;
+  params.degradationPreference = 'maintain-framerate';
+  sender.setParameters(params).catch((err) => console.error('Failed to set encoding params:', err));
 }
 
-// Re-applies the current bitrate setting to every active video sender —
-// used when the user changes the bitrate control while already sharing.
-export function updateBitrate() {
+// Re-applies the current bitrate/framerate settings to every active video
+// sender — used when the user changes a share-panel control while already
+// sharing.
+export function updateEncodingParams() {
   peerConnections.forEach((pc) => {
     pc.getSenders().forEach((sender) => {
-      if (sender.track && sender.track.kind === 'video') applyBitrateToSender(sender);
+      if (sender.track && sender.track.kind === 'video') applyEncodingParams(sender);
     });
   });
 }
@@ -151,7 +159,7 @@ export async function callPeer(peerId) {
   state.localStream.getTracks().forEach((track) => {
     const sender = pc.addTrack(track, state.localStream);
     if (track.kind === 'video') {
-      applyBitrateToSender(sender);
+      applyEncodingParams(sender);
       preferH264(pc, sender);
     }
   });

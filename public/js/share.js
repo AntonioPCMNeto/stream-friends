@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { addOrUpdateTile, removeTile } from './tiles.js';
-import { callPeer, updateBitrate, announceSharingStatus } from './peers.js';
+import { callPeer, updateEncodingParams, announceSharingStatus } from './peers.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 
@@ -94,6 +94,7 @@ async function startSharing() {
     // will drop frames under bandwidth pressure instead of losing quality.
     stream.getVideoTracks()[0].contentHint = 'motion';
 
+    state.videoFramerateFps = framerate;
     state.localStream = stream;
     state.isSharing = true;
     addOrUpdateTile('local', stream, `Você (${state.myUsername})`, true /* isLocal */);
@@ -126,12 +127,20 @@ export function initSharing() {
   initSegmented(framerateGroup);
   initSegmented(bitrateGroup);
 
-  // Bitrate can change on the fly: push it to active senders immediately
-  // instead of waiting for the next share to pick it up.
+  // Bitrate/framerate can change on the fly: push them to active senders
+  // immediately instead of waiting for the next share to pick them up.
+  // (Framerate here only caps the outgoing encode — it can't raise the
+  // capture rate above what getDisplayMedia was started with.)
   bitrateGroup.addEventListener('click', (e) => {
     if (e.target.tagName !== 'BUTTON') return;
     state.videoBitrateKbps = Number(bitrateGroup.dataset.value) || null;
-    if (state.isSharing) updateBitrate();
+    if (state.isSharing) updateEncodingParams();
+  });
+
+  framerateGroup.addEventListener('click', (e) => {
+    if (e.target.tagName !== 'BUTTON') return;
+    state.videoFramerateFps = Number(framerateGroup.dataset.value) || null;
+    if (state.isSharing) updateEncodingParams();
   });
 
   startBtn.addEventListener('click', () => {
