@@ -70,13 +70,13 @@ async function startSharing() {
 
   try {
     const framerate = Number(framerateGroup.dataset.value);
-    // Screen capture is content-driven, not clock-driven — a static desktop
-    // legitimately produces far fewer than `framerate` new frames, and no
-    // constraint can force frames that were never captured. `min` is mostly
-    // advisory here (Chrome doesn't strictly enforce it for display capture
-    // the way it does for cameras), but it's honest about intent and costs
-    // nothing to set.
-    const videoConstraints = { frameRate: { min: framerate, ideal: framerate, max: framerate } };
+    // Only `ideal`/`max` here — getDisplayMedia throws on `min` (and `exact`)
+    // frameRate constraints ("min constraints are not supported"), which
+    // aborts the whole capture. A floor would be meaningless anyway: screen
+    // capture is content-driven, so a static desktop legitimately produces
+    // far fewer frames than `framerate` and no constraint can conjure frames
+    // that were never captured.
+    const videoConstraints = { frameRate: { ideal: framerate, max: framerate } };
 
     if (resolutionGroup.dataset.value !== 'auto') {
       const [width, height] = resolutionGroup.dataset.value.split('x').map(Number);
