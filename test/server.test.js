@@ -2,45 +2,79 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 process.env.PORT = '3999';
-const { server } = require('../server');
-const { TokenVerifier } = require('livekit-server-sdk');
+const { server, io } = require('../server');
+const { io: ioc } = require('socket.io-client');
 
 const URL = 'http://localhost:3999';
-const verifier = new TokenVerifier('devkey', 'secret');
 
-test('issues a valid token with the requested room grant', async () => {
-  const res = await fetch(`${URL}/token?room=room-a&identity=alice-123&name=Alice`);
-  assert.strictEqual(res.status, 200);
+function connect() {
+  return new Promise((resolve) => {
+    const socket = ioc(URL, { forceNew: true });
+    socket.on('connect', () => resolve(socket));
+  });
+}
 
-  const { token } = await res.json();
-  const claims = await verifier.verify(token);
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  assert.strictEqual(claims.video.room, 'room-a');
-  assert.strictEqual(claims.video.roomJoin, true);
-  assert.strictEqual(claims.sub, 'alice-123');
-  assert.strictEqual(claims.name, 'Alice');
+test('signal is only relayed to a peer in the same room', async () => {
+  const alice = await connect();
+  const bob = await connect();
+  const eve = await connect();
+
+  alice.emit('join-room', { roomId: 'room-a', username: 'Alice' });
+  bob.emit('join-room', { roomId: 'room-a', username: 'Bob' });
+  eve.emit('join-room', { roomId: 'room-b', username: 'Eve' });
+  await wait(100);
+
+  let received = false;
+  bob.on('signal', () => { received = true; });
+
+  eve.emit('signal', { to: bob.id, data: { type: 'offer', sdp: 'malicious' } });
+  await wait(150);
+
+  assert.strictEqual(received, false, 'a signal from a different room must be dropped');
+
+  alice.close();
+  bob.close();
+  eve.close();
 });
 
-test('rejects a missing room', async () => {
-  const res = await fetch(`${URL}/token?identity=alice-123&name=Alice`);
-  assert.strictEqual(res.status, 400);
+test('signal is relayed between peers in the same room', async () => {
+  const alice = await connect();
+  const bob = await connect();
+
+  alice.emit('join-room', { roomId: 'room-c', username: 'Alice' });
+  bob.emit('join-room', { roomId: 'room-c', username: 'Bob' });
+  await wait(100);
+
+  const signalReceived = new Promise((resolve) => bob.once('signal', resolve));
+  alice.emit('signal', { to: bob.id, data: { type: 'offer', sdp: 'real' } });
+
+  const { from, data } = await signalReceived;
+  assert.strictEqual(from, alice.id);
+  assert.strictEqual(data.sdp, 'real');
+
+  alice.close();
+  bob.close();
 });
 
-test('rejects a missing identity', async () => {
-  const res = await fetch(`${URL}/token?room=room-a&name=Alice`);
-  assert.strictEqual(res.status, 400);
-});
+test('join-room rejects an empty room id or username', async () => {
+  const socket = await connect();
+  const existingPeersReceived = new Promise((resolve) => {
+    socket.once('existing-peers', () => resolve(true));
+  });
 
-test('rejects an empty name', async () => {
-  const res = await fetch(`${URL}/token?room=room-a&identity=alice-123&name=`);
-  assert.strictEqual(res.status, 400);
-});
+  socket.emit('join-room', { roomId: '', username: 'Alice' });
+  socket.emit('join-room', { roomId: 'ok-room', username: '' });
+  const timedOut = await Promise.race([existingPeersReceived, wait(150).then(() => false)]);
 
-test('rejects a room id over the length limit', async () => {
-  const res = await fetch(`${URL}/token?room=${'a'.repeat(65)}&identity=alice-123&name=Alice`);
-  assert.strictEqual(res.status, 400);
+  assert.strictEqual(timedOut, false, 'invalid join-room payloads must not be accepted');
+  socket.close();
 });
 
 test.after(() => {
+  io.close();
   server.close();
 });

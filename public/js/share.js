@@ -1,7 +1,6 @@
 import { state } from './state.js';
 import { addOrUpdateTile, removeTile } from './tiles.js';
-import { room } from './livekit.js';
-import { Track, RoomEvent } from '../vendor/livekit-client.esm.js';
+import { callPeer, updateEncodingParams, announceSharingStatus, removeOutgoingTracks } from './peers.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 
@@ -38,58 +37,31 @@ function setSharingUI(sharing) {
 function openPanel() { sharePanel.classList.remove('hidden'); }
 function closePanel() { sharePanel.classList.add('hidden'); }
 
-function findScreenSharePublication() {
-  return [...room.localParticipant.trackPublications.values()].find(
-    (pub) => pub.source === Track.Source.ScreenShare
-  );
-}
-
-// Re-applies the current bitrate/framerate to the single outgoing sender —
-// used when the user changes a share-panel control while already sharing.
-// Unlike the old mesh version, there's only ever one sender to update here:
-// LiveKit's SFU fans this one encode out to every viewer server-side,
-// instead of this app encoding a separate copy per viewer.
-function updateLiveEncodingParams() {
-  const sender = findScreenSharePublication()?.track?.sender;
-  if (!sender) return;
-  const params = sender.getParameters();
-  if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
-  params.encodings[0].maxBitrate = state.videoBitrateKbps ? state.videoBitrateKbps * 1000 : undefined;
-  params.encodings[0].maxFramerate = state.videoFramerateFps || undefined;
-  sender.setParameters(params).catch((err) => console.error('Failed to update encoding params:', err));
-}
-
-// Central cleanup for when our screen-share track goes away — whether we
-// clicked "stop" (stopSharing below unpublishes it) or the browser's
-// native share-bar Stop button ended the MediaStreamTrack directly.
-// LiveKit notices either way and unpublishes, firing this same event, so
-// there's exactly one cleanup path instead of two.
-room.on(RoomEvent.LocalTrackUnpublished, (publication) => {
-  if (publication.source !== Track.Source.ScreenShare) return;
-  if (!state.isSharing) return;
+// Stops our outgoing tracks. Stopping the local tracks alone doesn't tell
+// any peer connection anything — announceSharingStatus(false) is what
+// actually makes everyone's tile disappear immediately (peers.js acts on
+// it directly), while removeOutgoingTracks() cleans up the WebRTC side
+// (removes our senders and renegotiates) so restarting a share later
+// doesn't pile a new track on top of a stale one.
+// Safe to call even when not currently sharing (e.g. on room exit).
+export function stopSharing() {
+  const wasSharing = !!state.localStream;
+  if (state.localStream) {
+    state.localStream.getTracks().forEach((track) => track.stop());
+  }
   state.isSharing = false;
+  state.localStream = null;
   removeTile('local');
   setSharingUI(false);
-  showToast('Compartilhamento de tela interrompido.');
-  refreshParticipants();
-});
-
-// Unpublishing (rather than the old track.stop() + manual renegotiation)
-// is what actually signals "this track is gone" to every viewer — LiveKit
-// tells the SFU, which tells every subscriber, instead of the remote side
-// just going quiet with a frozen last frame.
-export function stopSharing() {
-  if (!state.isSharing) return;
-  room.localParticipant.trackPublications.forEach((publication) => {
-    if (publication.source === Track.Source.ScreenShare || publication.source === Track.Source.ScreenShareAudio) {
-      room.localParticipant.unpublishTrack(publication.track, true);
-    }
-  });
+  if (wasSharing) {
+    removeOutgoingTracks();
+    showToast('Compartilhamento de tela interrompido.');
+    announceSharingStatus(false);
+    refreshParticipants();
+  }
 }
 
-// HOST SIDE: capture the screen and publish it once — LiveKit's SFU
-// forwards it to every viewer, so this is the only encode that ever runs
-// on this machine regardless of how many people are watching.
+// HOST SIDE: capture screen and call everyone in the room
 async function startSharing() {
   if (!navigator.mediaDevices?.getDisplayMedia) {
     showToast('Compartilhamento de tela não é suportado neste navegador/dispositivo.', 'error');
@@ -128,38 +100,25 @@ async function startSharing() {
       }
     });
 
-    const videoTrack = stream.getVideoTracks()[0];
     // Tells the encoder to favor smooth frame delivery over per-frame
     // sharpness — the default ('detail') optimizes for static content and
     // will drop frames under bandwidth pressure instead of losing quality.
-    videoTrack.contentHint = 'motion';
+    stream.getVideoTracks()[0].contentHint = 'motion';
 
     state.videoFramerateFps = framerate;
-
-    const publication = await room.localParticipant.publishTrack(videoTrack, {
-      source: Track.Source.ScreenShare,
-      videoCodec: 'h264',
-      screenShareEncoding: {
-        maxBitrate: state.videoBitrateKbps ? state.videoBitrateKbps * 1000 : undefined,
-        maxFramerate: framerate,
-      },
-    });
-    // Protects framerate over resolution/sharpness when bandwidth gets
-    // tight — screen-share content (games, video, scrolling) is usually
-    // motion-heavy, so a steady framerate reads as smoother than a sharper
-    // but stuttery picture.
-    await publication.track.setDegradationPreference('maintain-framerate');
-
-    const audioTrack = stream.getAudioTracks()[0];
-    if (audioTrack) {
-      await room.localParticipant.publishTrack(audioTrack, { source: Track.Source.ScreenShareAudio });
-    }
-
+    state.localStream = stream;
     state.isSharing = true;
     addOrUpdateTile('local', stream, `Você (${state.myUsername})`, true /* isLocal */);
     showToast('Você começou a compartilhar sua tela.');
     setSharingUI(true);
+    announceSharingStatus(true);
     refreshParticipants();
+
+    // Call everyone already known in the room
+    state.knownPeers.forEach(callPeer);
+
+    // Handle user stopping the stream via the browser's native share bar
+    stream.getVideoTracks()[0].onended = () => stopSharing();
   } catch (err) {
     console.error('Failed to capture screen:', err);
     // getDisplayMedia doesn't distinguish "user clicked Cancel" from "user
@@ -179,18 +138,20 @@ export function initSharing() {
   initSegmented(framerateGroup);
   initSegmented(bitrateGroup);
 
-  // Bitrate/framerate can change on the fly: push them to the active
-  // sender immediately instead of waiting for the next share to pick them up.
+  // Bitrate/framerate can change on the fly: push them to active senders
+  // immediately instead of waiting for the next share to pick them up.
+  // (Framerate here only caps the outgoing encode — it can't raise the
+  // capture rate above what getDisplayMedia was started with.)
   bitrateGroup.addEventListener('click', (e) => {
     if (e.target.tagName !== 'BUTTON') return;
     state.videoBitrateKbps = Number(bitrateGroup.dataset.value) || null;
-    if (state.isSharing) updateLiveEncodingParams();
+    if (state.isSharing) updateEncodingParams();
   });
 
   framerateGroup.addEventListener('click', (e) => {
     if (e.target.tagName !== 'BUTTON') return;
     state.videoFramerateFps = Number(framerateGroup.dataset.value) || null;
-    if (state.isSharing) updateLiveEncodingParams();
+    if (state.isSharing) updateEncodingParams();
   });
 
   startBtn.addEventListener('click', () => {
