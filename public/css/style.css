@@ -300,6 +300,26 @@ main {
   background: #000;
   display: block;
 }
+
+/* "Hide this stream" — the sharer stops sending video, so the tile would
+   otherwise freeze on the last frame; cover it and offer a way back. */
+.stream-hidden-cover {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: none;
+  cursor: pointer;
+}
+.tile.stream-hidden .stream-hidden-cover { display: flex; }
+.tile.stream-hidden video { visibility: hidden; }
 .tile:fullscreen {
   width: 100vw;
   height: 100vh;

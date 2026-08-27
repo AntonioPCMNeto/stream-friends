@@ -1,4 +1,5 @@
 import { state } from './state.js';
+import { setWatching } from './peers.js';
 
 const videosContainer = document.getElementById('videos');
 const tiles = new Map(); // tile key ('local' or socket id) -> tile <div>
@@ -65,7 +66,7 @@ function switchFullscreen(direction) {
 // are filled in by renderTiles(); everything transient the viewer sets here
 // (mute, volume, stats visibility, which controls show) lives on the node
 // and survives every re-render.
-function createTile(isLocal) {
+function createTile(isLocal, key) {
   const tile = document.createElement('div');
   tile.className = 'tile';
 
@@ -74,6 +75,10 @@ function createTile(isLocal) {
   video.playsInline = true;
   video.muted = true;
   video.ondblclick = () => toggleFullscreen(tile);
+
+  // "Hide this stream" cover — click it (or the 👁 button) to bring the
+  // stream back. Only built for remote tiles; wired further down.
+  let hiddenCover = null;
 
   const statsEl = document.createElement('div');
   statsEl.className = 'tile-stats';
@@ -88,6 +93,30 @@ function createTile(isLocal) {
   actions.className = 'tile-actions';
 
   if (!isLocal) {
+    // Tell the sharer to stop / resume sending us this screen. While hidden
+    // they encode nothing for us — it's a real bandwidth + CPU cut on both
+    // ends, not just a UI hide.
+    const watchBtn = document.createElement('button');
+    watchBtn.className = 'icon-btn';
+    watchBtn.title = 'Ocultar stream';
+    watchBtn.setAttribute('aria-label', 'Ocultar stream');
+    watchBtn.textContent = '👁';
+
+    hiddenCover = document.createElement('button');
+    hiddenCover.className = 'stream-hidden-cover';
+    hiddenCover.textContent = 'Stream oculto — clique para mostrar';
+
+    const toggleHidden = () => {
+      const hidden = tile.classList.toggle('stream-hidden');
+      watchBtn.textContent = hidden ? '🚫' : '👁';
+      watchBtn.title = hidden ? 'Mostrar stream' : 'Ocultar stream';
+      watchBtn.setAttribute('aria-label', watchBtn.title);
+      setWatching(key, !hidden);
+    };
+    watchBtn.onclick = toggleHidden;
+    hiddenCover.onclick = toggleHidden;
+    actions.appendChild(watchBtn);
+
     const muteBtn = document.createElement('button');
     muteBtn.className = 'icon-btn';
     muteBtn.title = 'Mudo';
@@ -179,6 +208,7 @@ function createTile(isLocal) {
   overlay.appendChild(labelEl);
   overlay.appendChild(actions);
   tile.appendChild(video);
+  if (hiddenCover) tile.appendChild(hiddenCover); // above the video, below the controls
   tile.appendChild(statsEl);
   tile.appendChild(prevBtn);
   tile.appendChild(nextBtn);
@@ -220,7 +250,7 @@ export function renderTiles() {
   for (const [key, { stream, label, isLocal }] of desired) {
     let tile = tiles.get(key);
     if (!tile) {
-      tile = createTile(isLocal);
+      tile = createTile(isLocal, key);
       videosContainer.appendChild(tile);
       initAutoHide(tile);
       tiles.set(key, tile);
