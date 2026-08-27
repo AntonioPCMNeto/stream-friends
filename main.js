@@ -74,25 +74,50 @@ function registerScreenPicker() {
   }, { useSystemPicker: false });
 }
 
-// Checks the GitHub Releases feed (see the "publish" block in package.json)
-// for a newer version, downloads it in the background if found, and
-// installs it automatically the next time the app quits — no manual
-// download/reinstall needed. Only meaningful for a packaged install: there
-// is no installer/update feed to compare against when running unpacked via
-// `electron .`, and autoUpdater errors out if you try there.
-function checkForUpdates() {
-  if (!app.isPackaged) return;
-
+// electron-updater checks the GitHub Releases feed (the "publish" block in
+// package.json) for a newer version, downloads it in the background, and
+// installs it on the next quit — no manual download/reinstall. It runs once
+// on launch and again whenever the renderer asks (the "Verificar
+// atualizações" button, over the `updater:*` IPC below). Unpackaged
+// (`electron .`) there's no install to update and autoUpdater errors out,
+// so the checks are skipped and the button reports that instead.
+function initUpdater() {
   autoUpdater.logger = console;
-  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-    console.error('Auto-update check failed:', err);
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  const send = (state, extra = {}) =>
+    mainWindow?.webContents.send('updater:status', { state, ...extra });
+
+  autoUpdater.on('update-available', (info) => send('available', { version: info.version }));
+  autoUpdater.on('update-not-available', () => send('up-to-date'));
+  autoUpdater.on('download-progress', (p) => send('downloading', { percent: Math.round(p.percent) }));
+  autoUpdater.on('update-downloaded', (info) => send('downloaded', { version: info.version }));
+  autoUpdater.on('error', (err) => send('error', { message: String(err?.message || err) }));
+
+  ipcMain.handle('updater:check', async () => {
+    if (!app.isPackaged) return { state: 'dev' };
+    try {
+      await autoUpdater.checkForUpdates();
+      return { state: 'checking' };
+    } catch (err) {
+      return { state: 'error', message: String(err?.message || err) };
+    }
   });
+  ipcMain.handle('updater:install', () => {
+    if (app.isPackaged) autoUpdater.quitAndInstall();
+  });
+  ipcMain.handle('updater:version', () => app.getVersion());
+
+  if (app.isPackaged) {
+    autoUpdater.checkForUpdates().catch((err) => console.error('Auto-update check failed:', err));
+  }
 }
 
 app.whenReady().then(() => {
   createWindow();
   registerScreenPicker();
-  checkForUpdates();
+  initUpdater();
 });
 
 app.on('window-all-closed', () => {

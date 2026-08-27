@@ -83,6 +83,14 @@ main {
 }
 .welcome-back.hidden { display: none; }
 
+.check-updates-btn {
+  width: 100%;
+  margin-top: 10px;
+  font-size: 12px;
+  padding: 8px;
+}
+.check-updates-btn.hidden { display: none; }
+
 .field { display: block; margin-bottom: 16px; text-align: left; }
 .field span { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
 .field input {

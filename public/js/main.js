@@ -3,6 +3,7 @@ import { initPeerSignaling } from './peers.js';
 import { initSharing } from './share.js';
 import { initParticipants } from './participants.js';
 import { initScreenPicker } from './screenPicker.js';
+import { initUpdater } from './updater.js';
 
 // The Electron shell loads this page via file://, which has no server of
 // its own to be "same-origin" with — so unlike the web app (which calls
@@ -17,3 +18,4 @@ initPeerSignaling(socket);
 initSharing();
 initParticipants();
 initScreenPicker();
+initUpdater();

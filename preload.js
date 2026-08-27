@@ -12,3 +12,14 @@ contextBridge.exposeInMainWorld('screenPicker', {
     ipcRenderer.send('screen-picker:selection', result);
   },
 });
+
+// electron-updater bridge — see initUpdater() in main.js. Absent on the web
+// build, which is how public/js/updater.js knows to stay hidden there.
+contextBridge.exposeInMainWorld('updater', {
+  check: () => ipcRenderer.invoke('updater:check'),
+  install: () => ipcRenderer.invoke('updater:install'),
+  version: () => ipcRenderer.invoke('updater:version'),
+  onStatus: (callback) => {
+    ipcRenderer.on('updater:status', (_event, payload) => callback(payload));
+  },
+});
