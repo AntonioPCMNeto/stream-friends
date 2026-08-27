@@ -9,6 +9,7 @@ let selectedButton = null;
 let selectedSourceId = null;
 let selectedIsScreen = false;
 let audioEnabled = true;
+let onKeyDown = null;
 
 // Set for the lifetime of one picker; called exactly once with the result.
 let resolvePick = null;
@@ -21,6 +22,10 @@ function finish(result) {
 }
 
 function closeOverlay() {
+  if (onKeyDown) {
+    document.removeEventListener('keydown', onKeyDown);
+    onKeyDown = null;
+  }
   if (overlay) overlay.remove();
   overlay = null;
   selectedButton = null;
@@ -152,6 +157,7 @@ function showPicker(sources) {
     grid.innerHTML = '';
     selectedButton = null;
     selectedSourceId = null;
+    selectedIsScreen = false;
     confirmBtn.disabled = true;
     list.forEach((source) => grid.appendChild(buildSourceButton(source, confirmBtn)));
   }
@@ -187,12 +193,8 @@ function showPicker(sources) {
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) finish(null);
   });
-  document.addEventListener('keydown', function onKey(e) {
-    if (e.key === 'Escape' && overlay) {
-      document.removeEventListener('keydown', onKey);
-      finish(null);
-    }
-  });
+  onKeyDown = (e) => { if (e.key === 'Escape') finish(null); };
+  document.addEventListener('keydown', onKeyDown);
 }
 
 // Shows the picker and resolves to the user's choice, or null on cancel.

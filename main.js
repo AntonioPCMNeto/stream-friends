@@ -32,8 +32,8 @@ function createWindow() {
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
     console.error('did-fail-load', errorCode, errorDescription, validatedURL);
   });
-  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
-    console.log('renderer console:', message, `(${sourceId}:${line})`);
+  mainWindow.webContents.on('console-message', ({ level, message, lineNumber, sourceId }) => {
+    console.log(`renderer console [${level}]:`, message, `(${sourceId}:${lineNumber})`);
   });
 
   mainWindow.loadFile(path.join(__dirname, 'public', 'index.html'));
