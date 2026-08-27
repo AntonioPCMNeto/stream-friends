@@ -80,6 +80,15 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('peer-share-status', { id: socket.id, isSharing: info.sharing });
   });
 
+  // A viewer telling one specific sharer whether it still wants their screen
+  // (the "hide this stream" toggle). Same room-scoped target check as
+  // 'signal' — a client can only address peers in its own room.
+  socket.on('watch-status', ({ to, watching }) => {
+    const targetSocket = io.sockets.sockets.get(to);
+    if (!targetSocket || !socket.data.roomId || targetSocket.data.roomId !== socket.data.roomId) return;
+    io.to(to).emit('watch-status', { from: socket.id, watching: Boolean(watching) });
+  });
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     const { roomId } = socket.data;

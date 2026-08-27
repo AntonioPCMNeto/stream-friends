@@ -7,6 +7,22 @@ import { refreshParticipants } from './participants.js';
 const peerConnections = new Map(); // socket id -> RTCPeerConnection
 let socket = null;
 
+// HOST SIDE: viewers who used their "hide this stream" toggle. We keep their
+// video sender but replaceTrack(null) it, so we stop encoding/uploading our
+// screen to them entirely until they un-hide. Survives source switches and
+// re-offers; cleared when we stop sharing or the peer leaves.
+const pausedViewers = new Set();
+
+// The sender carrying a given media kind on a connection. Matches on
+// receiver.track too, since after replaceTrack(null) the sender's own track
+// is null and no longer identifies it.
+function senderForKind(pc, kind) {
+  const tx = pc?.getTransceivers().find(
+    (t) => ((t.sender.track || t.receiver.track)?.kind) === kind
+  );
+  return tx?.sender || null;
+}
+
 function getOrCreatePeerConnection(peerId) {
   let pc = peerConnections.get(peerId);
   if (pc) return pc;
@@ -63,6 +79,7 @@ function closePeerConnection(peerId) {
     pc.close();
     peerConnections.delete(peerId);
   }
+  pausedViewers.delete(peerId);
   lastStatsSample.delete(peerId);
   state.streams.delete(peerId);
   renderTiles();
@@ -72,6 +89,13 @@ function closePeerConnection(peerId) {
 // we're currently sharing our screen.
 export function announceSharingStatus(isSharing) {
   socket.emit('share-status', { isSharing });
+}
+
+// VIEWER SIDE: ask one sharer to start or stop sending us their screen (the
+// per-tile "hide this stream" toggle). They stop encoding for us entirely
+// while hidden — see the 'watch-status' handler in initPeerSignaling.
+export function setWatching(peerId, watching) {
+  socket.emit('watch-status', { to: peerId, watching });
 }
 
 export function closeAllPeerConnections() {
@@ -352,6 +376,11 @@ export async function callPeer(peerId) {
       preferHardwareH264(pc, sender);
     }
   });
+  // Peer hid our stream before we (re)connected — offer the m-line but send
+  // no video until they un-hide.
+  if (pausedViewers.has(peerId)) {
+    await senderForKind(pc, 'video')?.replaceTrack(null);
+  }
   await sendOffer(pc, peerId);
 }
 
@@ -371,19 +400,17 @@ export async function replaceOutgoingStream(newStream) {
       let renegotiate = false;
 
       for (const kind of ['video', 'audio']) {
-        // Match on receiver.track too: after a previous switch cleared this
-        // sender's track to null, sender.track alone no longer identifies it.
-        const tx = pc.getTransceivers().find(
-          (t) => ((t.sender.track || t.receiver.track)?.kind) === kind
-        );
-        if (tx) {
-          await tx.sender.replaceTrack(next[kind]); // null is valid — stops that kind
-          if (kind === 'video' && next.video) applyEncodingParams(tx.sender);
-        } else if (next[kind]) {
-          const sender = pc.addTrack(next[kind], newStream);
+        // A viewer who hid our stream still gets the new m-line but no video.
+        const track = kind === 'video' && pausedViewers.has(peerId) ? null : next[kind];
+        const sender = senderForKind(pc, kind);
+        if (sender) {
+          await sender.replaceTrack(track); // null is valid — stops that kind
+          if (kind === 'video' && track) applyEncodingParams(sender);
+        } else if (track) {
+          const added = pc.addTrack(track, newStream);
           if (kind === 'video') {
-            applyEncodingParams(sender);
-            preferHardwareH264(pc, sender);
+            applyEncodingParams(added);
+            preferHardwareH264(pc, added);
           }
           renegotiate = true;
         }
@@ -406,6 +433,7 @@ export async function replaceOutgoingStream(newStream) {
 export function removeOutgoingTracks() {
   streamUpLogged = false; // re-log codec/encoder on the next share
   lastLimitLog = { reason: 'none', at: 0 };
+  pausedViewers.clear(); // a fresh share is visible to everyone again
   stopFrameCounter();
   peerConnections.forEach((pc, peerId) => {
     const activeSenders = pc.getSenders().filter((sender) => sender.track);
@@ -473,6 +501,19 @@ export function initPeerSignaling(theSocket) {
       lastStatsSample.delete(id);
     }
     refreshParticipants();
+  });
+
+  // HOST SIDE: a viewer hid (watching:false) or un-hid (watching:true) our
+  // stream. Drop / restore the video track on just that connection — no
+  // renegotiation, and while hidden the encoder has nothing to do for them.
+  socket.on('watch-status', ({ from, watching }) => {
+    if (watching) pausedViewers.delete(from);
+    else pausedViewers.add(from);
+
+    const sender = senderForKind(peerConnections.get(from), 'video');
+    if (!sender) return; // not connected yet — callPeer() will honor pausedViewers
+    const want = watching ? state.localStream?.getVideoTracks()[0] || null : null;
+    if ((sender.track || null) !== want) sender.replaceTrack(want).catch(() => {});
   });
 
   // Handle incoming offer/answer/ICE-candidate messages relayed by the server
