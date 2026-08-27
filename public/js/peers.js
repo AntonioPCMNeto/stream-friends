@@ -1,6 +1,6 @@
 import { iceServers } from './iceServers.js';
 import { state } from './state.js';
-import { addOrUpdateTile, removeTile, updateTileStats } from './tiles.js';
+import { renderTiles, updateTileStats } from './tiles.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 
@@ -30,10 +30,13 @@ function getOrCreatePeerConnection(peerId) {
 
   // RECEIVER SIDE: a remote track means someone is sending us their screen
   pc.ontrack = (event) => {
-    const label = state.peerUsernames.get(peerId) || `Usuário ${peerId.slice(0, 5)}`;
-    addOrUpdateTile(peerId, event.streams[0], label, false /* isLocal */);
+    state.streams.set(peerId, event.streams[0]);
+    renderTiles();
 
-    event.track.onended = () => removeTile(peerId);
+    event.track.onended = () => {
+      state.streams.delete(peerId);
+      renderTiles();
+    };
   };
 
   peerConnections.set(peerId, pc);
@@ -47,7 +50,8 @@ function closePeerConnection(peerId) {
     peerConnections.delete(peerId);
   }
   lastStatsSample.delete(peerId);
-  removeTile(peerId);
+  state.streams.delete(peerId);
+  renderTiles();
 }
 
 // Tells the server (and, through it, everyone else in the room) whether
@@ -367,7 +371,8 @@ export function initPeerSignaling(theSocket) {
       state.sharingPeers.add(id);
     } else {
       state.sharingPeers.delete(id);
-      removeTile(id);
+      state.streams.delete(id);
+      renderTiles();
       lastStatsSample.delete(id);
     }
     refreshParticipants();

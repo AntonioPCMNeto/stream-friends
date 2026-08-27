@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { addOrUpdateTile, removeTile } from './tiles.js';
+import { renderTiles } from './tiles.js';
 import { callPeer, updateEncodingParams, announceSharingStatus, removeOutgoingTracks } from './peers.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
@@ -52,7 +52,7 @@ export function stopSharing() {
   }
   state.isSharing = false;
   state.localStream = null;
-  removeTile('local');
+  renderTiles();
   setSharingUI(false);
   if (wasSharing) {
     removeOutgoingTracks();
@@ -122,7 +122,7 @@ async function startSharing() {
     state.videoFramerateFps = framerate;
     state.localStream = stream;
     state.isSharing = true;
-    addOrUpdateTile('local', stream, `Você (${state.myUsername})`, true /* isLocal */);
+    renderTiles();
     showToast('Você começou a compartilhar sua tela.');
     setSharingUI(true);
     announceSharingStatus(true);
