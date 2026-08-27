@@ -60,18 +60,33 @@ export function closeAllPeerConnections() {
   Array.from(peerConnections.keys()).forEach(closePeerConnection);
 }
 
-// Caps a video sender's outgoing bitrate/framerate (state.videoBitrateKbps /
-// state.videoFramerateFps — falsy bitrate means no cap) and tells the
-// encoder to protect framerate over resolution/sharpness when bandwidth
-// gets tight. Screen-share content (games, video, scrolling) is usually
-// motion-heavy, so a steady framerate reads as smoother than a sharper but
-// stuttery picture — the default 'balanced' preference can still sacrifice
-// framerate to preserve resolution, which is the wrong tradeoff here.
+// In a mesh each viewer gets an independent encode of the same screen, so
+// total encode cost scales with viewer count. Past a few viewers, dropping
+// the sent resolution keeps every stream's framerate alive instead of the
+// encoder thrashing on all of them. Small sessions stay at full resolution.
+function viewerResolutionScale() {
+  const n = peerConnections.size;
+  if (n <= 2) return 1;
+  if (n <= 4) return 1.5;
+  return 2;
+}
+
+// Configures a video sender: bitrate/framerate caps (state.videoBitrateKbps /
+// state.videoFramerateFps — falsy bitrate means no cap), a viewer-count
+// resolution scale, high network priority so the screen stream wins
+// contention, and 'maintain-framerate' degradation. Screen-share content
+// (games, video, scrolling) is motion-heavy, so a steady framerate reads as
+// smoother than a sharper but stuttery picture — the default preference can
+// sacrifice framerate to hold resolution, the wrong tradeoff here.
 function applyEncodingParams(sender) {
   const params = sender.getParameters();
   if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
-  params.encodings[0].maxBitrate = state.videoBitrateKbps ? state.videoBitrateKbps * 1000 : undefined;
-  params.encodings[0].maxFramerate = state.videoFramerateFps || undefined;
+  const enc = params.encodings[0];
+  enc.maxBitrate = state.videoBitrateKbps ? state.videoBitrateKbps * 1000 : undefined;
+  enc.maxFramerate = state.videoFramerateFps || undefined;
+  enc.scaleResolutionDownBy = viewerResolutionScale();
+  enc.networkPriority = 'high';
+  enc.priority = 'high';
   params.degradationPreference = 'maintain-framerate';
   sender.setParameters(params).catch((err) => console.error('Failed to set encoding params:', err));
 }
@@ -87,32 +102,49 @@ export function updateEncodingParams() {
   });
 }
 
-// Prefers H.264 over the other offered video codecs. Unlike VP8/VP9, H.264
-// has near-universal hardware encode/decode support across GPUs (Intel
-// QuickSync, NVENC, AMD VCE), which keeps CPU usage down — important here
-// since Chrome runs one independent encoder per peer connection, so sharing
-// to several viewers multiplies encode cost per viewer regardless of codec.
-// Falls back silently where unsupported.
-function preferH264(pc, sender) {
+// Reorders the offered video codecs so a hardware-friendly H.264 variant is
+// negotiated first. H.264 has near-universal hardware encode/decode (Intel
+// QuickSync, NVENC, AMD VCE); Chrome runs one encoder per peer connection,
+// so a software codec (VP8/VP9/AV1) multiplies CPU per viewer while a
+// hardware one stays roughly flat. Within H.264 we rank packetization-mode=1
+// and Constrained Baseline (profile-level-id 42e01f / 42001f) highest —
+// that's the profile every hardware encoder implements, so it's least
+// likely to silently fall back to the software encoder. No-op (keeps the
+// default order) where H.264 isn't offered at all.
+function preferHardwareH264(pc, sender) {
   const transceiver = pc.getTransceivers().find((t) => t.sender === sender);
   if (!transceiver?.setCodecPreferences) return;
-  const capabilities = RTCRtpSender.getCapabilities('video');
-  if (!capabilities) return;
-  const h264 = capabilities.codecs.filter((c) => c.mimeType === 'video/H264');
-  const others = capabilities.codecs.filter((c) => c.mimeType !== 'video/H264');
-  transceiver.setCodecPreferences([...h264, ...others]);
+  const caps = RTCRtpSender.getCapabilities('video');
+  if (!caps) return;
+
+  const h264Score = (c) => {
+    const fmtp = (c.sdpFmtpLine || '').toLowerCase();
+    let s = 0;
+    if (fmtp.includes('packetization-mode=1')) s += 2;
+    if (fmtp.includes('profile-level-id=42e01f') || fmtp.includes('profile-level-id=42001f')) s += 1;
+    return s;
+  };
+
+  const h264 = caps.codecs
+    .filter((c) => c.mimeType === 'video/H264')
+    .sort((a, b) => h264Score(b) - h264Score(a));
+  if (h264.length === 0) return;
+
+  const rest = caps.codecs.filter((c) => c.mimeType !== 'video/H264');
+  transceiver.setCodecPreferences([...h264, ...rest]);
 }
 
 // key ('local' or a remote peer id) -> { bytes, ts } from the last sample,
 // used to turn cumulative byte counters into an instantaneous kbps figure.
 const lastStatsSample = new Map();
 
-// Turns a getStats() report into a "1280x720 · 30fps · 850kbps" tile badge.
+// Turns a getStats() report into a "1280×720 · 30fps · 850kbps" tile badge,
+// with an optional trailing note (codec, quality-limitation reason).
 // The first sample for a key only seeds the baseline (no delta yet to show).
 // A negative byte delta means the underlying sender/receiver changed between
 // samples (e.g. share stopped and restarted) — skip that tick rather than
 // show a bogus spike, and let the next sample re-seed cleanly.
-function applyStatsSample(key, report, bytesField) {
+function applyStatsSample(key, report, bytesField, note = '') {
   const bytes = report[bytesField];
   const ts = report.timestamp;
   const prev = lastStatsSample.get(key);
@@ -125,8 +157,12 @@ function applyStatsSample(key, report, bytesField) {
 
   const kbps = Math.round((deltaBytes * 8) / deltaMs);
   const fps = Math.round(report.framesPerSecond || 0);
-  updateTileStats(key, `${report.frameWidth}×${report.frameHeight} · ${fps}fps · ${kbps}kbps`);
+  updateTileStats(key, `${report.frameWidth}×${report.frameHeight} · ${fps}fps · ${kbps}kbps${note}`);
 }
+
+// Logged once, the first time we see an outbound video encode — confirms
+// which codec and encoder (hardware vs software) actually got negotiated.
+let encoderLogged = false;
 
 // Polls every connection's real send/receive stats and updates each tile's
 // badge. For the local tile (we may be sending to several viewers at once)
@@ -135,13 +171,17 @@ function applyStatsSample(key, report, bytesField) {
 // behind by a previous share session.
 async function pollStats() {
   let bestOutbound = null;
+  let bestOutboundReport = null; // the full getStats() map bestOutbound came from
   const inboundByPeer = new Map();
 
   for (const [peerId, pc] of peerConnections) {
     const statsReport = await pc.getStats();
     statsReport.forEach((report) => {
       if (report.type === 'outbound-rtp' && report.kind === 'video') {
-        if (!bestOutbound || report.bytesSent > bestOutbound.bytesSent) bestOutbound = report;
+        if (!bestOutbound || report.bytesSent > bestOutbound.bytesSent) {
+          bestOutbound = report;
+          bestOutboundReport = statsReport;
+        }
       } else if (report.type === 'inbound-rtp' && report.kind === 'video') {
         inboundByPeer.set(peerId, report);
       }
@@ -149,7 +189,16 @@ async function pollStats() {
   }
 
   if (bestOutbound) {
-    applyStatsSample('local', bestOutbound, 'bytesSent');
+    const codecName = bestOutboundReport.get(bestOutbound.codecId)?.mimeType?.split('/')[1];
+    const reason = bestOutbound.qualityLimitationReason;
+    let note = codecName ? ` · ${codecName}` : '';
+    if (reason && reason !== 'none') note += ` · ⚠${reason}`; // 'cpu' or 'bandwidth'
+    applyStatsSample('local', bestOutbound, 'bytesSent', note);
+
+    if (!encoderLogged && bestOutbound.encoderImplementation) {
+      encoderLogged = true;
+      console.log(`[stream] codec=${codecName} encoder=${bestOutbound.encoderImplementation} scale=${bestOutbound.scalabilityMode || viewerResolutionScale() + 'x'}`);
+    }
   } else if (state.localStream) {
     // No viewer connected yet — there's no outbound RTP to measure, so show
     // the capture track's own resolution/framerate. Bitrate only exists once
@@ -176,7 +225,7 @@ export async function callPeer(peerId) {
     const sender = pc.addTrack(track, state.localStream);
     if (track.kind === 'video') {
       applyEncodingParams(sender);
-      preferH264(pc, sender);
+      preferHardwareH264(pc, sender);
     }
   });
   await sendOffer(pc, peerId);
@@ -192,6 +241,7 @@ export async function callPeer(peerId) {
 // we start sharing again later (addTrack would otherwise add a second,
 // parallel m-line on top of the still-registered old one).
 export function removeOutgoingTracks() {
+  encoderLogged = false; // re-log codec/encoder on the next share
   peerConnections.forEach((pc, peerId) => {
     const activeSenders = pc.getSenders().filter((sender) => sender.track);
     if (activeSenders.length === 0) return;
@@ -215,15 +265,19 @@ export function initPeerSignaling(theSocket) {
       state.peerUsernames.set(id, username);
       if (sharing) state.sharingPeers.add(id);
     });
-    if (state.isSharing) peers.forEach(({ id }) => callPeer(id));
+    if (state.isSharing) {
+      Promise.all(peers.map(({ id }) => callPeer(id))).then(updateEncodingParams);
+    }
     refreshParticipants();
   });
 
-  // A peer joined after us — call them if we're already sharing
+  // A peer joined after us — call them if we're already sharing, then
+  // re-apply encoding params everywhere (the higher viewer count may lower
+  // the sent resolution for every stream).
   socket.on('viewer-joined', ({ id, username }) => {
     state.knownPeers.add(id);
     state.peerUsernames.set(id, username);
-    if (state.isSharing) callPeer(id);
+    if (state.isSharing) callPeer(id).then(updateEncodingParams);
     showToast(`${username} entrou na sala`);
     refreshParticipants();
   });
@@ -234,6 +288,7 @@ export function initPeerSignaling(theSocket) {
     state.peerUsernames.delete(peerId);
     state.sharingPeers.delete(peerId);
     closePeerConnection(peerId);
+    updateEncodingParams(); // fewer viewers — resolution can scale back up
     showToast(`${username} saiu da sala`);
     refreshParticipants();
   });
