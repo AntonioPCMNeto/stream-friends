@@ -492,6 +492,7 @@ main {
   cursor: pointer;
 }
 .picker-audio-toggle input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+.picker-audio-hint { font-size: 13px; color: var(--text-dim); font-style: italic; }
 .picker-footer-btns { display: flex; gap: 10px; }
 
 /* Toasts */
