@@ -33,10 +33,15 @@ function getOrCreatePeerConnection(peerId) {
     state.streams.set(peerId, event.streams[0]);
     renderTiles();
 
-    event.track.onended = () => {
-      state.streams.delete(peerId);
-      renderTiles();
-    };
+    // Only the video track ending means the share is gone — an audio track
+    // stopping on its own shouldn't drop the tile. (In practice the
+    // authoritative signal is 'peer-share-status'; this is the fallback.)
+    if (event.track.kind === 'video') {
+      event.track.onended = () => {
+        state.streams.delete(peerId);
+        renderTiles();
+      };
+    }
   };
 
   peerConnections.set(peerId, pc);
