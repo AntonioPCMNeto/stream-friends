@@ -61,6 +61,9 @@ main {
 .btn-ghost:hover { color: var(--text); border-color: var(--accent); }
 .btn-danger { background: #ef4444; color: white; }
 .btn-danger:hover { background: #f16060; }
+/* .btn's display:inline-flex would otherwise win over a plain .hidden
+   (equal specificity, later in the file), so hidden buttons need this. */
+.btn.hidden { display: none; }
 
 /* Lobby */
 .card {

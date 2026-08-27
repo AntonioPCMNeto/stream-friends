@@ -28,9 +28,18 @@ function getOrCreatePeerConnection(peerId) {
     }
   };
 
-  // RECEIVER SIDE: a remote track means someone is sending us their screen
+  // RECEIVER SIDE: a remote track means someone is sending us their screen.
+  // Merge every track from this peer into one MediaStream we own, keyed by
+  // peer id, rather than trusting event.streams[0] — a track added by a later
+  // renegotiation (e.g. the sharer switches to a source that has audio) comes
+  // in under a different stream id and would otherwise orphan the video tile.
   pc.ontrack = (event) => {
-    state.streams.set(peerId, event.streams[0]);
+    let stream = state.streams.get(peerId);
+    if (!stream) {
+      stream = new MediaStream();
+      state.streams.set(peerId, stream);
+    }
+    if (!stream.getTrackById(event.track.id)) stream.addTrack(event.track);
     renderTiles();
 
     // Only the video track ending means the share is gone — an audio track
@@ -344,6 +353,45 @@ export async function callPeer(peerId) {
     }
   });
   await sendOffer(pc, peerId);
+}
+
+// HOST SIDE: swap the shared source (screen/window/tab) on every live viewer
+// connection without tearing anything down. sender.replaceTrack() changes the
+// media in place — no offer/answer — so viewers just see the picture change.
+// A renegotiation only happens in the uncommon case where the new source adds
+// or drops an audio track relative to the old one.
+export async function replaceOutgoingStream(newStream) {
+  const next = {
+    video: newStream.getVideoTracks()[0] || null,
+    audio: newStream.getAudioTracks()[0] || null,
+  };
+
+  await Promise.all(
+    Array.from(peerConnections.entries()).map(async ([peerId, pc]) => {
+      let renegotiate = false;
+
+      for (const kind of ['video', 'audio']) {
+        // Match on receiver.track too: after a previous switch cleared this
+        // sender's track to null, sender.track alone no longer identifies it.
+        const tx = pc.getTransceivers().find(
+          (t) => ((t.sender.track || t.receiver.track)?.kind) === kind
+        );
+        if (tx) {
+          await tx.sender.replaceTrack(next[kind]); // null is valid — stops that kind
+          if (kind === 'video' && next.video) applyEncodingParams(tx.sender);
+        } else if (next[kind]) {
+          const sender = pc.addTrack(next[kind], newStream);
+          if (kind === 'video') {
+            applyEncodingParams(sender);
+            preferHardwareH264(pc, sender);
+          }
+          renegotiate = true;
+        }
+      }
+
+      if (renegotiate) await sendOffer(pc, peerId);
+    })
+  );
 }
 
 // Called when we stop sharing. Just calling track.stop() on our local

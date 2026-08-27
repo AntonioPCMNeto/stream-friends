@@ -1,10 +1,11 @@
 import { state } from './state.js';
 import { renderTiles } from './tiles.js';
-import { callPeer, updateEncodingParams, announceSharingStatus, removeOutgoingTracks } from './peers.js';
+import { callPeer, updateEncodingParams, announceSharingStatus, removeOutgoingTracks, replaceOutgoingStream } from './peers.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 
 const startBtn = document.getElementById('startShareBtn');
+const switchBtn = document.getElementById('switchSourceBtn');
 const shareControl = document.querySelector('.share-control');
 const sharePanel = document.getElementById('sharePanel');
 const confirmShareBtn = document.getElementById('confirmShareBtn');
@@ -32,6 +33,7 @@ function setSharingUI(sharing) {
   startBtn.textContent = sharing ? '⏹ Parar Compartilhamento' : '🖥️ Iniciar Compartilhamento';
   startBtn.classList.toggle('btn-danger', sharing);
   startBtn.classList.toggle('btn-primary', !sharing);
+  switchBtn.classList.toggle('hidden', !sharing);
 }
 
 function openPanel() { sharePanel.classList.remove('hidden'); }
@@ -61,6 +63,73 @@ export function stopSharing() {
   }
 }
 
+// Runs getDisplayMedia with the panel's current resolution/framerate.
+// Returns the MediaStream ready to send (contentHint set, native-stop
+// wired), or null if the user cancelled the picker. Throws on a real
+// capture failure.
+async function captureDisplay() {
+  const framerate = Number(framerateGroup.dataset.value);
+  // `ideal` only. A hard `max` makes the OS screen-capturer do its own
+  // frame-rate limiting, which delivers frames unevenly; the encoder's
+  // maxFramerate (peers.js) is a smoother ceiling. `min`/`exact` throw and
+  // abort the capture, and a floor is meaningless anyway — screen capture
+  // is content-driven, so a static screen legitimately produces fewer
+  // frames than requested and no constraint can conjure the missing ones.
+  const videoConstraints = { frameRate: { ideal: framerate } };
+
+  if (resolutionGroup.dataset.value === 'auto') {
+    // "Origem": capture at the streamer's real display resolution.
+    // Unconstrained, Chrome usually hands back a downscaled buffer (often
+    // 1920×1080). Requesting the physical pixel size as `ideal` gets the
+    // native panel resolution for a full-screen share without forcing an
+    // upscale of a smaller source (a single window or tab).
+    videoConstraints.width = { ideal: Math.round(screen.width * devicePixelRatio) };
+    videoConstraints.height = { ideal: Math.round(screen.height * devicePixelRatio) };
+  } else {
+    const [width, height] = resolutionGroup.dataset.value.split('x').map(Number);
+    videoConstraints.width = { ideal: width };
+    videoConstraints.height = { ideal: height };
+  }
+
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    video: videoConstraints,
+    audio: {
+      // Sharing a tab or a single app window always captures just that
+      // source's audio; systemAudio only affects the "Entire Screen" case
+      // — 'include' (the default) lets it fall back to whole-system audio there.
+      systemAudio: 'include',
+      // echoCancellation/noiseSuppression/autoGainControl default to browser
+      // mic-processing behavior, which can audibly mangle captured system/tab
+      // audio (music, game sound). This is display audio, not a microphone.
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false
+    }
+  });
+
+  // Tells the encoder to favor smooth frame delivery over per-frame
+  // sharpness — the default ('detail') optimizes for static content and
+  // will drop frames under bandwidth pressure instead of losing quality.
+  stream.getVideoTracks()[0].contentHint = 'motion';
+  // User stopping capture from the browser's native share bar.
+  stream.getVideoTracks()[0].onended = () => stopSharing();
+  state.videoFramerateFps = framerate;
+  return stream;
+}
+
+function reportCaptureError(err) {
+  console.error('Failed to capture screen:', err);
+  // getDisplayMedia doesn't distinguish "user clicked Cancel" from "user
+  // denied permission" — both surface as NotAllowedError.
+  if (err.name === 'NotAllowedError') {
+    showToast('Permissão negada ou compartilhamento cancelado.', 'error');
+  } else if (err.name === 'NotSupportedError' || err.name === 'NotFoundError') {
+    showToast('Compartilhamento de tela não é suportado neste navegador/dispositivo.', 'error');
+  } else {
+    showToast('Erro ao capturar a tela.', 'error');
+  }
+}
+
 // HOST SIDE: capture screen and call everyone in the room
 async function startSharing() {
   if (!navigator.mediaDevices?.getDisplayMedia) {
@@ -69,51 +138,9 @@ async function startSharing() {
   }
 
   try {
-    const framerate = Number(framerateGroup.dataset.value);
-    // `ideal` only. A hard `max` makes the OS screen-capturer do its own
-    // frame-rate limiting, which delivers frames unevenly; the encoder's
-    // maxFramerate (peers.js) is a smoother ceiling. `min`/`exact` throw and
-    // abort the capture, and a floor is meaningless anyway — screen capture
-    // is content-driven, so a static screen legitimately produces fewer
-    // frames than requested and no constraint can conjure the missing ones.
-    const videoConstraints = { frameRate: { ideal: framerate } };
+    const stream = await captureDisplay();
+    if (!stream) return; // picker cancelled
 
-    if (resolutionGroup.dataset.value === 'auto') {
-      // "Origem": capture at the streamer's real display resolution.
-      // Unconstrained, Chrome/Electron usually hand back a downscaled buffer
-      // (often 1920×1080). Requesting the physical pixel size as `ideal` gets
-      // the native panel resolution for a full-screen share without forcing
-      // an upscale of a smaller source (a single window or tab).
-      videoConstraints.width = { ideal: Math.round(screen.width * devicePixelRatio) };
-      videoConstraints.height = { ideal: Math.round(screen.height * devicePixelRatio) };
-    } else {
-      const [width, height] = resolutionGroup.dataset.value.split('x').map(Number);
-      videoConstraints.width = { ideal: width };
-      videoConstraints.height = { ideal: height };
-    }
-
-    const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: videoConstraints,
-      audio: {
-        // Sharing a tab or a single app window always captures just that
-        // source's audio; systemAudio only affects the "Entire Screen" case
-        // — 'include' (the default) lets it fall back to whole-system audio there.
-        systemAudio: 'include',
-        // echoCancellation/noiseSuppression/autoGainControl default to browser
-        // mic-processing behavior, which can audibly mangle captured system/tab
-        // audio (music, game sound). This is display audio, not a microphone.
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false
-      }
-    });
-
-    // Tells the encoder to favor smooth frame delivery over per-frame
-    // sharpness — the default ('detail') optimizes for static content and
-    // will drop frames under bandwidth pressure instead of losing quality.
-    stream.getVideoTracks()[0].contentHint = 'motion';
-
-    state.videoFramerateFps = framerate;
     state.localStream = stream;
     state.isSharing = true;
     renderTiles();
@@ -122,22 +149,32 @@ async function startSharing() {
     announceSharingStatus(true);
     refreshParticipants();
 
-    // Call everyone already known in the room
     state.knownPeers.forEach(callPeer);
-
-    // Handle user stopping the stream via the browser's native share bar
-    stream.getVideoTracks()[0].onended = () => stopSharing();
   } catch (err) {
-    console.error('Failed to capture screen:', err);
-    // getDisplayMedia doesn't distinguish "user clicked Cancel" from "user
-    // denied permission" — both surface as NotAllowedError.
-    if (err.name === 'NotAllowedError') {
-      showToast('Permissão negada ou compartilhamento cancelado.', 'error');
-    } else if (err.name === 'NotSupportedError' || err.name === 'NotFoundError') {
-      showToast('Compartilhamento de tela não é suportado neste navegador/dispositivo.', 'error');
-    } else {
-      showToast('Erro ao capturar a tela.', 'error');
-    }
+    reportCaptureError(err);
+  }
+}
+
+// HOST SIDE: pick a different screen/window and swap it in live — viewers
+// keep watching, the picture just changes (see replaceOutgoingStream).
+async function switchSource() {
+  if (!state.isSharing) return;
+  const previous = state.localStream;
+  try {
+    const stream = await captureDisplay();
+    if (!stream) return; // picker cancelled — current share untouched
+
+    await replaceOutgoingStream(stream);
+    state.localStream = stream;
+    renderTiles(); // repoints the local preview
+
+    previous.getVideoTracks().forEach((t) => { t.onended = null; });
+    previous.getTracks().forEach((t) => t.stop());
+    showToast('Fonte de compartilhamento trocada.');
+  } catch (err) {
+    // captureDisplay threw — the previous stream is still live and still
+    // wired to every viewer, so there's nothing to roll back.
+    reportCaptureError(err);
   }
 }
 
@@ -171,6 +208,8 @@ export function initSharing() {
       closePanel();
     }
   });
+
+  switchBtn.addEventListener('click', switchSource);
 
   confirmShareBtn.addEventListener('click', () => {
     closePanel();
