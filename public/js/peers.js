@@ -1,6 +1,6 @@
 import { iceServers } from './iceServers.js';
 import { state } from './state.js';
-import { addOrUpdateTile, removeTile, updateTileStats } from './tiles.js';
+import { addOrUpdateTile, removeTile, updateTileStats, getTileVideo } from './tiles.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 
@@ -164,6 +164,27 @@ function applyStatsSample(key, report, bytesField, note = '') {
 // which codec and encoder (hardware vs software) actually got negotiated.
 let encoderLogged = false;
 
+// { frames, ts } from the local preview <video>'s getVideoPlaybackQuality(),
+// used to measure real captured framerate while sharing solo (no viewer =
+// no outbound RTP to read framesPerSecond from). Screen capture is
+// content-driven, so this reads well below the nominal rate on a static
+// screen — which is the honest number.
+let localFrameSample = null;
+
+function measureLocalCaptureFps() {
+  const q = getTileVideo('local')?.getVideoPlaybackQuality?.();
+  if (!q) return null;
+  const frames = q.totalVideoFrames;
+  const ts = performance.now();
+  const prev = localFrameSample;
+  localFrameSample = { frames, ts };
+  if (!prev) return null;
+  const df = frames - prev.frames;
+  const dt = ts - prev.ts;
+  if (df < 0 || dt <= 0) return null;
+  return Math.round((df * 1000) / dt);
+}
+
 // Polls every connection's real send/receive stats and updates each tile's
 // badge. For the local tile (we may be sending to several viewers at once)
 // this picks one representative outbound stream — whichever currently has
@@ -189,6 +210,7 @@ async function pollStats() {
   }
 
   if (bestOutbound) {
+    localFrameSample = null; // RTP path takes over — re-seed if a viewer later leaves
     const codecName = bestOutboundReport.get(bestOutbound.codecId)?.mimeType?.split('/')[1];
     const reason = bestOutbound.qualityLimitationReason;
     let note = codecName ? ` · ${codecName}` : '';
@@ -200,12 +222,15 @@ async function pollStats() {
       console.log(`[stream] codec=${codecName} encoder=${bestOutbound.encoderImplementation} scale=${bestOutbound.scalabilityMode || viewerResolutionScale() + 'x'}`);
     }
   } else if (state.localStream) {
-    // No viewer connected yet — there's no outbound RTP to measure, so show
-    // the capture track's own resolution/framerate. Bitrate only exists once
-    // we're actually encoding for someone.
+    // No viewer connected — no outbound RTP, so read resolution off the
+    // capture track and count real presented frames off the preview <video>
+    // for a live framerate (falls back to the nominal rate for the first
+    // tick, before there's a delta to measure).
     const settings = state.localStream.getVideoTracks()[0]?.getSettings();
     if (settings?.width) {
-      updateTileStats('local', `${settings.width}×${settings.height} · ${Math.round(settings.frameRate || 0)}fps`);
+      const liveFps = measureLocalCaptureFps();
+      const fps = liveFps != null ? liveFps : Math.round(settings.frameRate || 0);
+      updateTileStats('local', `${settings.width}×${settings.height} · ${fps}fps`);
     }
   }
   inboundByPeer.forEach((report, peerId) => applyStatsSample(peerId, report, 'bytesReceived'));
@@ -242,6 +267,7 @@ export async function callPeer(peerId) {
 // parallel m-line on top of the still-registered old one).
 export function removeOutgoingTracks() {
   encoderLogged = false; // re-log codec/encoder on the next share
+  localFrameSample = null;
   peerConnections.forEach((pc, peerId) => {
     const activeSenders = pc.getSenders().filter((sender) => sender.track);
     if (activeSenders.length === 0) return;

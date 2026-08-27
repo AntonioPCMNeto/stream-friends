@@ -206,3 +206,10 @@ export function removeTile(key) {
     tiles.delete(key);
   }
 }
+
+// The <video> element of a tile (or null). The stats poller uses this to
+// measure the local preview's real framerate before any viewer connects,
+// when there's no outbound RTP to read it from.
+export function getTileVideo(key) {
+  return tiles.get(key)?.querySelector('video') || null;
+}
