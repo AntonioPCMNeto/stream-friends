@@ -148,7 +148,17 @@ async function pollStats() {
     });
   }
 
-  if (bestOutbound) applyStatsSample('local', bestOutbound, 'bytesSent');
+  if (bestOutbound) {
+    applyStatsSample('local', bestOutbound, 'bytesSent');
+  } else if (state.localStream) {
+    // No viewer connected yet — there's no outbound RTP to measure, so show
+    // the capture track's own resolution/framerate. Bitrate only exists once
+    // we're actually encoding for someone.
+    const settings = state.localStream.getVideoTracks()[0]?.getSettings();
+    if (settings?.width) {
+      updateTileStats('local', `${settings.width}×${settings.height} · ${Math.round(settings.frameRate || 0)}fps`);
+    }
+  }
   inboundByPeer.forEach((report, peerId) => applyStatsSample(peerId, report, 'bytesReceived'));
 }
 
