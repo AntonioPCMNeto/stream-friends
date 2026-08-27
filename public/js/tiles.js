@@ -1,3 +1,5 @@
+import { state } from './state.js';
+
 const videosContainer = document.getElementById('videos');
 const tiles = new Map(); // tile key ('local' or socket id) -> tile <div>
 
@@ -56,138 +58,178 @@ function switchFullscreen(direction) {
   tiles.get(keys[nextIndex]).requestFullscreen();
 }
 
-// One video tile per stream (your own preview plus one per remote streamer).
-// Tiles always start muted — Chrome blocks unmuted autoplay without a prior
-// user gesture, which a friend just opening the room link won't have given
-// yet. Remote tiles get a mute toggle and a volume slider.
-export function addOrUpdateTile(key, stream, label, isLocal) {
-  let tile = tiles.get(key);
-  if (!tile) {
-    tile = document.createElement('div');
-    tile.className = 'tile';
+// Builds one video tile (your own preview or a remote streamer's). Tiles
+// always start muted — Chrome blocks unmuted autoplay without a prior user
+// gesture, which a friend just opening the room link won't have given yet.
+// Remote tiles get a mute toggle and a volume slider. The stream and label
+// are filled in by renderTiles(); everything transient the viewer sets here
+// (mute, volume, stats visibility, which controls show) lives on the node
+// and survives every re-render.
+function createTile(isLocal) {
+  const tile = document.createElement('div');
+  tile.className = 'tile';
 
-    const video = document.createElement('video');
-    video.autoplay = true;
-    video.playsInline = true;
-    video.muted = true;
-    video.ondblclick = () => toggleFullscreen(tile);
+  const video = document.createElement('video');
+  video.autoplay = true;
+  video.playsInline = true;
+  video.muted = true;
+  video.ondblclick = () => toggleFullscreen(tile);
 
-    const statsEl = document.createElement('div');
-    statsEl.className = 'tile-stats';
+  const statsEl = document.createElement('div');
+  statsEl.className = 'tile-stats';
 
-    const overlay = document.createElement('div');
-    overlay.className = 'tile-overlay';
+  const overlay = document.createElement('div');
+  overlay.className = 'tile-overlay';
 
-    const labelEl = document.createElement('span');
-    labelEl.className = 'tile-label';
+  const labelEl = document.createElement('span');
+  labelEl.className = 'tile-label';
 
-    const actions = document.createElement('div');
-    actions.className = 'tile-actions';
+  const actions = document.createElement('div');
+  actions.className = 'tile-actions';
 
-    if (!isLocal) {
-      const muteBtn = document.createElement('button');
-      muteBtn.className = 'icon-btn';
-      muteBtn.title = 'Mudo';
-      muteBtn.setAttribute('aria-label', 'Mudo');
-      muteBtn.textContent = '🔇';
-      muteBtn.onclick = () => {
-        video.muted = !video.muted;
-        const label = video.muted ? 'Ativar som' : 'Mudo';
-        muteBtn.textContent = video.muted ? '🔇' : '🔊';
-        muteBtn.title = label;
-        muteBtn.setAttribute('aria-label', label);
-      };
-      actions.appendChild(muteBtn);
-
-      const volumeSlider = document.createElement('input');
-      volumeSlider.type = 'range';
-      volumeSlider.className = 'volume-slider';
-      volumeSlider.min = '0';
-      volumeSlider.max = '1';
-      volumeSlider.step = '0.05';
-      volumeSlider.value = '1';
-      volumeSlider.title = 'Volume';
-      volumeSlider.setAttribute('aria-label', 'Volume');
-      volumeSlider.oninput = () => {
-        video.volume = Number(volumeSlider.value);
-        video.muted = false;
-        muteBtn.textContent = '🔊';
-        muteBtn.title = 'Mudo';
-      };
-      actions.appendChild(volumeSlider);
-    }
-
-    if (document.pictureInPictureEnabled && !video.disablePictureInPicture) {
-      const pipBtn = document.createElement('button');
-      pipBtn.className = 'icon-btn';
-      pipBtn.title = 'Picture-in-Picture';
-      pipBtn.setAttribute('aria-label', 'Picture-in-Picture');
-      pipBtn.textContent = '🗗';
-      pipBtn.onclick = async () => {
-        try {
-          if (document.pictureInPictureElement === video) {
-            await document.exitPictureInPicture();
-          } else {
-            await video.requestPictureInPicture();
-          }
-        } catch (err) {
-          console.error('Failed to toggle Picture-in-Picture:', err);
-        }
-      };
-      actions.appendChild(pipBtn);
-    }
-
-    // Toggles the resolution/fps/bitrate badge. Off by default — it's
-    // diagnostic detail, not something to stare at during a normal watch.
-    const infoBtn = document.createElement('button');
-    infoBtn.className = 'icon-btn';
-    infoBtn.title = 'Informações do stream';
-    infoBtn.setAttribute('aria-label', 'Informações do stream');
-    infoBtn.setAttribute('aria-pressed', 'false');
-    infoBtn.textContent = 'ℹ️';
-    infoBtn.onclick = () => {
-      const on = tile.classList.toggle('stats-visible');
-      infoBtn.setAttribute('aria-pressed', String(on));
+  if (!isLocal) {
+    const muteBtn = document.createElement('button');
+    muteBtn.className = 'icon-btn';
+    muteBtn.title = 'Mudo';
+    muteBtn.setAttribute('aria-label', 'Mudo');
+    muteBtn.textContent = '🔇';
+    muteBtn.onclick = () => {
+      video.muted = !video.muted;
+      const label = video.muted ? 'Ativar som' : 'Mudo';
+      muteBtn.textContent = video.muted ? '🔇' : '🔊';
+      muteBtn.title = label;
+      muteBtn.setAttribute('aria-label', label);
     };
-    actions.appendChild(infoBtn);
+    actions.appendChild(muteBtn);
 
-    const fullscreenBtn = document.createElement('button');
-    fullscreenBtn.className = 'icon-btn';
-    fullscreenBtn.title = 'Tela cheia';
-    fullscreenBtn.setAttribute('aria-label', 'Tela cheia');
-    fullscreenBtn.textContent = '⛶';
-    fullscreenBtn.onclick = () => toggleFullscreen(tile);
-    actions.appendChild(fullscreenBtn);
-
-    const prevBtn = document.createElement('button');
-    prevBtn.className = 'tile-nav prev';
-    prevBtn.title = 'Stream anterior';
-    prevBtn.setAttribute('aria-label', 'Stream anterior');
-    prevBtn.textContent = '◀';
-    prevBtn.onclick = () => switchFullscreen(-1);
-
-    const nextBtn = document.createElement('button');
-    nextBtn.className = 'tile-nav next';
-    nextBtn.title = 'Próximo stream';
-    nextBtn.setAttribute('aria-label', 'Próximo stream');
-    nextBtn.textContent = '▶';
-    nextBtn.onclick = () => switchFullscreen(1);
-
-    overlay.appendChild(labelEl);
-    overlay.appendChild(actions);
-    tile.appendChild(video);
-    tile.appendChild(statsEl);
-    tile.appendChild(prevBtn);
-    tile.appendChild(nextBtn);
-    tile.appendChild(overlay);
-
-    videosContainer.appendChild(tile);
-    initAutoHide(tile);
-    tiles.set(key, tile);
+    const volumeSlider = document.createElement('input');
+    volumeSlider.type = 'range';
+    volumeSlider.className = 'volume-slider';
+    volumeSlider.min = '0';
+    volumeSlider.max = '1';
+    volumeSlider.step = '0.05';
+    volumeSlider.value = '1';
+    volumeSlider.title = 'Volume';
+    volumeSlider.setAttribute('aria-label', 'Volume');
+    volumeSlider.oninput = () => {
+      video.volume = Number(volumeSlider.value);
+      video.muted = false;
+      muteBtn.textContent = '🔊';
+      muteBtn.title = 'Mudo';
+    };
+    actions.appendChild(volumeSlider);
   }
 
-  tile.querySelector('video').srcObject = stream;
-  tile.querySelector('.tile-label').textContent = label;
+  if (document.pictureInPictureEnabled && !video.disablePictureInPicture) {
+    const pipBtn = document.createElement('button');
+    pipBtn.className = 'icon-btn';
+    pipBtn.title = 'Picture-in-Picture';
+    pipBtn.setAttribute('aria-label', 'Picture-in-Picture');
+    pipBtn.textContent = '🗗';
+    pipBtn.onclick = async () => {
+      try {
+        if (document.pictureInPictureElement === video) {
+          await document.exitPictureInPicture();
+        } else {
+          await video.requestPictureInPicture();
+        }
+      } catch (err) {
+        console.error('Failed to toggle Picture-in-Picture:', err);
+      }
+    };
+    actions.appendChild(pipBtn);
+  }
+
+  // Toggles the resolution/fps/bitrate badge. Off by default — it's
+  // diagnostic detail, not something to stare at during a normal watch.
+  const infoBtn = document.createElement('button');
+  infoBtn.className = 'icon-btn';
+  infoBtn.title = 'Informações do stream';
+  infoBtn.setAttribute('aria-label', 'Informações do stream');
+  infoBtn.setAttribute('aria-pressed', 'false');
+  infoBtn.textContent = 'ℹ️';
+  infoBtn.onclick = () => {
+    const on = tile.classList.toggle('stats-visible');
+    infoBtn.setAttribute('aria-pressed', String(on));
+  };
+  actions.appendChild(infoBtn);
+
+  const fullscreenBtn = document.createElement('button');
+  fullscreenBtn.className = 'icon-btn';
+  fullscreenBtn.title = 'Tela cheia';
+  fullscreenBtn.setAttribute('aria-label', 'Tela cheia');
+  fullscreenBtn.textContent = '⛶';
+  fullscreenBtn.onclick = () => toggleFullscreen(tile);
+  actions.appendChild(fullscreenBtn);
+
+  const prevBtn = document.createElement('button');
+  prevBtn.className = 'tile-nav prev';
+  prevBtn.title = 'Stream anterior';
+  prevBtn.setAttribute('aria-label', 'Stream anterior');
+  prevBtn.textContent = '◀';
+  prevBtn.onclick = () => switchFullscreen(-1);
+
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'tile-nav next';
+  nextBtn.title = 'Próximo stream';
+  nextBtn.setAttribute('aria-label', 'Próximo stream');
+  nextBtn.textContent = '▶';
+  nextBtn.onclick = () => switchFullscreen(1);
+
+  overlay.appendChild(labelEl);
+  overlay.appendChild(actions);
+  tile.appendChild(video);
+  tile.appendChild(statsEl);
+  tile.appendChild(prevBtn);
+  tile.appendChild(nextBtn);
+  tile.appendChild(overlay);
+
+  return tile;
+}
+
+// Reconciles the tile grid against current state: the local preview while
+// we're sharing (state.localStream) plus one tile per inbound stream
+// (state.streams). Idempotent — call it after any change that adds or drops
+// a stream. Existing tile nodes are reused, so playback / PiP / volume / the
+// stats toggle are never interrupted by a re-render.
+export function renderTiles() {
+  const desired = new Map(); // key -> { stream, label, isLocal }
+
+  if (state.localStream) {
+    desired.set('local', {
+      stream: state.localStream,
+      label: `Você (${state.myUsername})`,
+      isLocal: true,
+    });
+  }
+  for (const [id, stream] of state.streams) {
+    desired.set(id, {
+      stream,
+      label: state.peerUsernames.get(id) || `Usuário ${id.slice(0, 5)}`,
+      isLocal: false,
+    });
+  }
+
+  for (const key of [...tiles.keys()]) {
+    if (!desired.has(key)) {
+      tiles.get(key).remove();
+      tiles.delete(key);
+    }
+  }
+
+  for (const [key, { stream, label, isLocal }] of desired) {
+    let tile = tiles.get(key);
+    if (!tile) {
+      tile = createTile(isLocal);
+      videosContainer.appendChild(tile);
+      initAutoHide(tile);
+      tiles.set(key, tile);
+    }
+    const video = tile.querySelector('video');
+    if (video.srcObject !== stream) video.srcObject = stream;
+    const labelEl = tile.querySelector('.tile-label');
+    if (labelEl.textContent !== label) labelEl.textContent = label;
+  }
 }
 
 // Updates the small "1280x720 · 30fps · 850kbps" badge shown on a tile.
@@ -197,12 +239,4 @@ export function updateTileStats(key, text) {
   const tile = tiles.get(key);
   if (!tile) return;
   tile.querySelector('.tile-stats').textContent = text;
-}
-
-export function removeTile(key) {
-  const tile = tiles.get(key);
-  if (tile) {
-    tile.remove();
-    tiles.delete(key);
-  }
 }

@@ -12,4 +12,5 @@ export const state = {
   knownPeers: new Set(), // remote socket ids
   peerUsernames: new Map(), // socket id -> username
   sharingPeers: new Set(), // socket ids currently sharing their screen
+  streams: new Map(), // tile key ('local' excluded — see state.localStream) -> inbound MediaStream
 };
