@@ -1,6 +1,6 @@
 import { iceServers } from './iceServers.js';
 import { state } from './state.js';
-import { addOrUpdateTile, removeTile, updateTileStats, getTileVideo } from './tiles.js';
+import { addOrUpdateTile, removeTile, updateTileStats } from './tiles.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 
@@ -164,17 +164,53 @@ function applyStatsSample(key, report, bytesField, note = '') {
 // which codec and encoder (hardware vs software) actually got negotiated.
 let encoderLogged = false;
 
-// { frames, ts } from the local preview <video>'s getVideoPlaybackQuality(),
-// used to measure real captured framerate while sharing solo (no viewer =
-// no outbound RTP to read framesPerSecond from). Screen capture is
-// content-driven, so this reads well below the nominal rate on a static
-// screen — which is the honest number.
-let localFrameSample = null;
+// Live capture-framerate measurement for the solo-sharer tile (no viewer =
+// no outbound RTP to read framesPerSecond from). Counts frames straight off
+// a clone of the capture track via MediaStreamTrackProcessor — unlike a
+// <video> element's frame counter, this keeps running at the true capture
+// rate even when the tab/window is backgrounded and rendering is throttled.
+// Screen capture is content-driven, so it reads well below the nominal rate
+// on a static screen — the honest number. Chromium-only; elsewhere the badge
+// falls back to the track's nominal frameRate.
+let frameCounter = null;   // { track (clone), reader, count, source (original) }
+let localFrameSample = null; // { frames, ts }
+
+function ensureFrameCounter() {
+  const source = state.localStream?.getVideoTracks()[0];
+  if (!source) return stopFrameCounter();
+  if (frameCounter?.source === source) return;
+  stopFrameCounter();
+  if (typeof MediaStreamTrackProcessor === 'undefined') return;
+
+  try {
+    const track = source.clone();
+    const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+    const fc = { track, reader, count: 0, source };
+    frameCounter = fc;
+    (async () => {
+      for (;;) {
+        const { value: frame, done } = await reader.read();
+        if (done) break;
+        fc.count++;
+        frame.close();
+      }
+    })().catch(() => {});
+  } catch { /* not supported / track already ended */ }
+}
+
+function stopFrameCounter() {
+  if (frameCounter) {
+    frameCounter.reader.cancel().catch(() => {});
+    frameCounter.track.stop();
+    frameCounter = null;
+  }
+  localFrameSample = null;
+}
 
 function measureLocalCaptureFps() {
-  const q = getTileVideo('local')?.getVideoPlaybackQuality?.();
-  if (!q) return null;
-  const frames = q.totalVideoFrames;
+  ensureFrameCounter();
+  if (!frameCounter) return null;
+  const frames = frameCounter.count;
   const ts = performance.now();
   const prev = localFrameSample;
   localFrameSample = { frames, ts };
@@ -210,7 +246,7 @@ async function pollStats() {
   }
 
   if (bestOutbound) {
-    localFrameSample = null; // RTP path takes over — re-seed if a viewer later leaves
+    stopFrameCounter(); // RTP path reports real fps now — drop the frame-counter clone
     const codecName = bestOutboundReport.get(bestOutbound.codecId)?.mimeType?.split('/')[1];
     const reason = bestOutbound.qualityLimitationReason;
     let note = codecName ? ` · ${codecName}` : '';
@@ -222,16 +258,17 @@ async function pollStats() {
       console.log(`[stream] codec=${codecName} encoder=${bestOutbound.encoderImplementation} scale=${bestOutbound.scalabilityMode || viewerResolutionScale() + 'x'}`);
     }
   } else if (state.localStream) {
-    // No viewer connected — no outbound RTP, so read resolution off the
-    // capture track and count real presented frames off the preview <video>
-    // for a live framerate (falls back to the nominal rate for the first
-    // tick, before there's a delta to measure).
+    // No viewer connected — no outbound RTP. Read resolution off the capture
+    // track and the live framerate off the frame counter (nominal rate for
+    // the first tick, before there's a delta to measure).
     const settings = state.localStream.getVideoTracks()[0]?.getSettings();
     if (settings?.width) {
       const liveFps = measureLocalCaptureFps();
       const fps = liveFps != null ? liveFps : Math.round(settings.frameRate || 0);
       updateTileStats('local', `${settings.width}×${settings.height} · ${fps}fps`);
     }
+  } else {
+    stopFrameCounter(); // not sharing — release the clone if one lingered
   }
   inboundByPeer.forEach((report, peerId) => applyStatsSample(peerId, report, 'bytesReceived'));
 }
@@ -267,7 +304,7 @@ export async function callPeer(peerId) {
 // parallel m-line on top of the still-registered old one).
 export function removeOutgoingTracks() {
   encoderLogged = false; // re-log codec/encoder on the next share
-  localFrameSample = null;
+  stopFrameCounter();
   peerConnections.forEach((pc, peerId) => {
     const activeSenders = pc.getSenders().filter((sender) => sender.track);
     if (activeSenders.length === 0) return;

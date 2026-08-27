@@ -2,6 +2,15 @@ const { app, BrowserWindow, session, desktopCapturer, ipcMain } = require('elect
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
+// Keep the renderer running at full speed while the window is minimized or
+// hidden behind other apps — the normal state during a screen share. Without
+// this, Chromium throttles timers/rAF/compositing when the window isn't
+// visible, which stalls the local stats readout (the capture and the WebRTC
+// stream to viewers are never throttled, only the in-app measurement).
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+
 let mainWindow = null;
 
 function createWindow() {
@@ -16,6 +25,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
   });
 
