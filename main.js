@@ -1,4 +1,5 @@
 const { app, BrowserWindow, session, desktopCapturer, ipcMain } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
 let mainWindow = null;
@@ -73,9 +74,25 @@ function registerScreenPicker() {
   }, { useSystemPicker: false });
 }
 
+// Checks the GitHub Releases feed (see the "publish" block in package.json)
+// for a newer version, downloads it in the background if found, and
+// installs it automatically the next time the app quits — no manual
+// download/reinstall needed. Only meaningful for a packaged install: there
+// is no installer/update feed to compare against when running unpacked via
+// `electron .`, and autoUpdater errors out if you try there.
+function checkForUpdates() {
+  if (!app.isPackaged) return;
+
+  autoUpdater.logger = console;
+  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+    console.error('Auto-update check failed:', err);
+  });
+}
+
 app.whenReady().then(() => {
   createWindow();
   registerScreenPicker();
+  checkForUpdates();
 });
 
 app.on('window-all-closed', () => {
