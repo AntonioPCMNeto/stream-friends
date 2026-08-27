@@ -29,10 +29,6 @@ export function initUpdater() {
       showToast('Atualizações automáticas só funcionam no app instalado.');
       return;
     }
-    if (res.state === 'error') {
-      showToast(`Falha ao verificar atualizações: ${res.message}`, 'error');
-      return;
-    }
     mode = 'busy';
     btn.textContent = 'Verificando…';
   });
@@ -56,11 +52,19 @@ export function initUpdater() {
         showVersionLabel();
         showToast('Você já está na versão mais recente.');
         break;
-      case 'error':
+      case 'error': {
         mode = 'idle';
         showVersionLabel();
-        showToast(`Falha na atualização: ${s.message}`, 'error');
+        // "No published versions" just means no release is out yet — that's
+        // not a failure the user needs a red alert about.
+        const noRelease = /no (published|version)/i.test(s.message || '');
+        if (noRelease) {
+          showToast('Nenhuma atualização disponível ainda.');
+        } else {
+          showToast(`Falha ao verificar atualizações: ${s.message}`, 'error');
+        }
         break;
+      }
     }
   });
 }

@@ -2,7 +2,6 @@ import { initLobby } from './lobby.js';
 import { initPeerSignaling } from './peers.js';
 import { initSharing } from './share.js';
 import { initParticipants } from './participants.js';
-import { initScreenPicker } from './screenPicker.js';
 import { initUpdater } from './updater.js';
 
 // The Electron shell loads this page via file://, which has no server of
@@ -17,5 +16,4 @@ initLobby(socket);
 initPeerSignaling(socket);
 initSharing();
 initParticipants();
-initScreenPicker();
 initUpdater();

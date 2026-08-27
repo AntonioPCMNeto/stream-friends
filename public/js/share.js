@@ -3,6 +3,7 @@ import { addOrUpdateTile, removeTile } from './tiles.js';
 import { callPeer, updateEncodingParams, announceSharingStatus, removeOutgoingTracks } from './peers.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
+import { pickSource } from './screenPicker.js';
 
 const startBtn = document.getElementById('startShareBtn');
 const shareControl = document.querySelector('.share-control');
@@ -84,20 +85,33 @@ async function startSharing() {
       videoConstraints.height = { ideal: height };
     }
 
+    // echoCancellation/noiseSuppression/autoGainControl default to browser
+    // mic-processing behavior, which can audibly mangle captured system/tab
+    // audio (music, game sound). This is display audio, not a microphone.
+    const audioProcessing = {
+      systemAudio: 'include',
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    };
+
+    let audioConstraint;
+    if (window.screenPicker) {
+      // Electron: run our themed picker first, then request audio only for a
+      // full-screen share. Electron can't capture a single window's audio, and
+      // asking for any audio on a window share aborts the whole getDisplayMedia
+      // call with "Invalid capture constraints".
+      const pick = await pickSource();
+      if (!pick) return; // user cancelled — no toast, matches native behavior
+      await window.screenPicker.choose({ sourceId: pick.sourceId, withAudio: pick.withAudio });
+      audioConstraint = pick.withAudio ? audioProcessing : false;
+    } else {
+      audioConstraint = audioProcessing;
+    }
+
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: videoConstraints,
-      audio: {
-        // Sharing a tab or a single app window always captures just that
-        // source's audio; systemAudio only affects the "Entire Screen" case
-        // — 'include' (the default) lets it fall back to whole-system audio there.
-        systemAudio: 'include',
-        // echoCancellation/noiseSuppression/autoGainControl default to browser
-        // mic-processing behavior, which can audibly mangle captured system/tab
-        // audio (music, game sound). This is display audio, not a microphone.
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false
-      }
+      audio: audioConstraint,
     });
 
     // Tells the encoder to favor smooth frame delivery over per-frame
@@ -128,7 +142,7 @@ async function startSharing() {
     } else if (err.name === 'NotSupportedError' || err.name === 'NotFoundError') {
       showToast('Compartilhamento de tela não é suportado neste navegador/dispositivo.', 'error');
     } else {
-      showToast('Erro ao capturar a tela.', 'error');
+      showToast(`Erro ao capturar a tela: ${err.name} — ${err.message}`, 'error');
     }
   }
 }

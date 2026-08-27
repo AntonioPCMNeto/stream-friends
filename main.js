@@ -29,48 +29,59 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'public', 'index.html'));
 }
 
-// Chrome/Edge show their own native "choose what to share" picker for
-// getDisplayMedia(); Electron doesn't, and instead resolves the request
-// through this handler. We fetch the available sources ourselves, hand
-// them to the renderer to show our own themed picker, and wait for the
-// user's choice (or cancellation) before resolving the request.
+// Chrome/Edge show their own "choose what to share" picker for
+// getDisplayMedia(); Electron doesn't and resolves the request through this
+// handler instead. The renderer runs our themed picker *before* calling
+// getDisplayMedia (screen-picker:sources + screen-picker:choose below) and
+// stashes the choice here — the handler just applies it. This ordering
+// matters: Electron can't capture a single window's audio, so a window
+// share must call getDisplayMedia with audio:false, and the renderer can
+// only know that once the picker has resolved. Requesting audio for a
+// window aborts the whole capture with "Invalid capture constraints".
+let pendingPick = null;
+
 function registerScreenPicker() {
-  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+  ipcMain.handle('screen-picker:sources', async () => {
     const sources = await desktopCapturer.getSources({
       types: ['screen', 'window'],
       thumbnailSize: { width: 320, height: 180 },
       fetchWindowIcons: true,
     });
-
-    const serializedSources = sources.map((source) => ({
+    return sources.map((source) => ({
       id: source.id,
       name: source.name,
       thumbnailDataUrl: source.thumbnail.toDataURL(),
       isScreen: source.id.startsWith('screen:'),
     }));
+  });
 
-    const selection = await new Promise((resolve) => {
-      ipcMain.once('screen-picker:selection', (_event, result) => resolve(result));
-      mainWindow.webContents.send('screen-picker:show', serializedSources);
-    });
+  // Awaited by the renderer before getDisplayMedia() so the choice is in
+  // place by the time the handler runs. Null clears a stale pick.
+  ipcMain.handle('screen-picker:choose', (_event, pick) => {
+    pendingPick = pick || null;
+  });
 
-    if (!selection) {
-      // User cancelled — resolving with no video makes getDisplayMedia()
-      // reject with NotAllowedError, which share.js already handles.
+  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    const pick = pendingPick;
+    pendingPick = null;
+    if (!pick) {
+      // No pick staged (cancelled, or getDisplayMedia called outside our
+      // flow) — empty response makes it reject with NotAllowedError, which
+      // share.js already handles.
       callback({});
       return;
     }
 
-    const chosen = sources.find((source) => source.id === selection.sourceId);
+    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
+    const chosen = sources.find((source) => source.id === pick.sourceId);
     if (!chosen) {
       callback({});
       return;
     }
 
-    // 'loopback' captures full system audio on Windows/macOS — real desktop
-    // audio capture that plain getDisplayMedia() in a browser can't offer
-    // for a full-screen share.
-    callback({ video: chosen, audio: selection.withAudio ? 'loopback' : undefined });
+    // 'loopback' captures whole-system audio (Windows/macOS). Only ever for
+    // a full screen — see the comment on pendingPick above.
+    callback({ video: chosen, audio: pick.withAudio ? 'loopback' : undefined });
   }, { useSystemPicker: false });
 }
 
@@ -97,12 +108,10 @@ function initUpdater() {
 
   ipcMain.handle('updater:check', async () => {
     if (!app.isPackaged) return { state: 'dev' };
-    try {
-      await autoUpdater.checkForUpdates();
-      return { state: 'checking' };
-    } catch (err) {
-      return { state: 'error', message: String(err?.message || err) };
-    }
+    // Any failure (network, no releases yet) surfaces through the 'error'
+    // event below — don't also reject here or the renderer double-reports it.
+    autoUpdater.checkForUpdates().catch(() => {});
+    return { state: 'checking' };
   });
   ipcMain.handle('updater:install', () => {
     if (app.isPackaged) autoUpdater.quitAndInstall();

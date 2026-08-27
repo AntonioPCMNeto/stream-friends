@@ -1,7 +1,8 @@
-// Electron doesn't show a native "choose what to share" dialog the way a
-// browser does — main.js's setDisplayMediaRequestHandler asks us to render
-// one instead, over IPC, and waits for our answer before getDisplayMedia()
-// in share.js resolves. This module owns that themed replacement dialog.
+// Electron doesn't show a native "choose what to share" dialog — this module
+// is the themed replacement. share.js calls pickSource() before it invokes
+// getDisplayMedia(); the promise resolves to { sourceId, isScreen, withAudio }
+// or null if the user cancels. main.js's display-media handler then applies
+// the choice (see screen-picker:choose there).
 
 let overlay = null;
 let selectedButton = null;
@@ -9,9 +10,14 @@ let selectedSourceId = null;
 let selectedIsScreen = false;
 let audioEnabled = true;
 
-function respond(result) {
-  window.screenPicker.select(result);
+// Set for the lifetime of one picker; called exactly once with the result.
+let resolvePick = null;
+
+function finish(result) {
+  const done = resolvePick;
+  resolvePick = null;
   closeOverlay();
+  if (done) done(result);
 }
 
 function closeOverlay() {
@@ -119,7 +125,7 @@ function showPicker(sources) {
   cancelBtn.type = 'button';
   cancelBtn.className = 'btn btn-ghost';
   cancelBtn.textContent = 'Cancelar';
-  cancelBtn.addEventListener('click', () => respond(null));
+  cancelBtn.addEventListener('click', () => finish(null));
 
   const confirmBtn = document.createElement('button');
   confirmBtn.type = 'button';
@@ -128,10 +134,13 @@ function showPicker(sources) {
   confirmBtn.disabled = true;
   confirmBtn.addEventListener('click', () => {
     if (!selectedSourceId) return;
-    // Belt-and-suspenders: only ever request loopback audio for a screen
-    // share, regardless of toggle state, since the toggle is hidden (but
-    // not necessarily reset) when switching tabs.
-    respond({ sourceId: selectedSourceId, withAudio: selectedIsScreen && audioEnabled });
+    // Only ever request loopback audio for a screen share, regardless of
+    // toggle state — the toggle is hidden (but not reset) on the windows tab.
+    finish({
+      sourceId: selectedSourceId,
+      isScreen: selectedIsScreen,
+      withAudio: selectedIsScreen && audioEnabled,
+    });
   });
 
   footerBtns.appendChild(cancelBtn);
@@ -176,17 +185,25 @@ function showPicker(sources) {
   document.body.appendChild(overlay);
 
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) respond(null);
+    if (e.target === overlay) finish(null);
   });
   document.addEventListener('keydown', function onKey(e) {
     if (e.key === 'Escape' && overlay) {
       document.removeEventListener('keydown', onKey);
-      respond(null);
+      finish(null);
     }
   });
 }
 
-export function initScreenPicker() {
-  if (!window.screenPicker) return; // not running inside Electron
-  window.screenPicker.onShow(showPicker);
+// Shows the picker and resolves to the user's choice, or null on cancel.
+// Only meaningful inside Electron (where window.screenPicker exists).
+export async function pickSource() {
+  if (!window.screenPicker) return null;
+  if (resolvePick) finish(null); // abandon any picker already open
+
+  const sources = await window.screenPicker.listSources();
+  return new Promise((resolve) => {
+    resolvePick = resolve;
+    showPicker(sources);
+  });
 }
