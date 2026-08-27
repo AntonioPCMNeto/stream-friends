@@ -1,25 +1,12 @@
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
+const { AccessToken } = require('livekit-server-sdk');
 
 const app = express();
 const server = http.createServer(app);
 
-// The web app talks to this server same-origin, so CORS never applies to
-// it — this only matters for the Electron client, which loads its page via
-// file:// (no origin to be "same" with) and must connect explicitly. There
-// are no cookies/auth here, just ephemeral in-memory room state, so a
-// wide-open origin doesn't expose anything a same-origin policy would
-// otherwise protect.
-const io = new Server(server, {
-  cors: { origin: '*' },
-});
-
 // Serve static frontend files
 app.use(express.static('public'));
-
-// roomId -> Map<socket.id, { username, sharing }>
-const rooms = new Map();
 
 const MAX_ROOM_ID_LENGTH = 64;
 const MAX_USERNAME_LENGTH = 50;
@@ -32,64 +19,30 @@ function isValidUsername(username) {
   return typeof username === 'string' && username.trim().length > 0 && username.length <= MAX_USERNAME_LENGTH;
 }
 
-io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+// devkey/secret match `livekit-server --dev`'s built-in credentials — swap
+// these (via env vars) for real ones against any other LiveKit deployment.
+const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'devkey';
+const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || 'secret';
 
-  socket.on('join-room', ({ roomId, username }) => {
-    if (!isValidRoomId(roomId) || !isValidUsername(username)) return;
+// Mints a short-lived LiveKit access token for one participant to join one
+// room. This replaces the old Socket.io signaling entirely — LiveKit's own
+// server (not this one) handles the actual WebRTC media routing; this
+// endpoint's only job is proving "this room/identity combination is
+// allowed to join," the same way the old join-room validation did.
+app.get('/token', async (req, res) => {
+  const { room, identity, name } = req.query;
+  if (!isValidRoomId(room) || !isValidUsername(identity) || !isValidUsername(name)) {
+    return res.status(400).json({ error: 'Invalid room, identity, or name' });
+  }
 
-    socket.join(roomId);
-    socket.data.roomId = roomId;
-    socket.data.username = username;
-
-    if (!rooms.has(roomId)) rooms.set(roomId, new Map());
-    const room = rooms.get(roomId);
-
-    // Tell the newly joined peer who is already in the room, including
-    // whether each of them is currently sharing.
-    socket.emit(
-      'existing-peers',
-      Array.from(room, ([id, info]) => ({ id, username: info.username, sharing: info.sharing }))
-    );
-
-    room.set(socket.id, { username, sharing: false });
-
-    // Announce the new peer to everyone already in the room
-    socket.to(roomId).emit('viewer-joined', { id: socket.id, username });
+  const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+    identity,
+    name,
+    ttl: '10m', // only needs to cover the initial connect handshake
   });
+  at.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true });
 
-  // Relay WebRTC offer/answer/ICE-candidate messages between two specific
-  // peers. Every socket implicitly has its own room named after its id,
-  // so io.to(to) reaches exactly that one client — but only after we
-  // confirm `to` is actually a peer in the sender's own room, otherwise
-  // any client could push fabricated signals at any other socket on the
-  // server regardless of room membership.
-  socket.on('signal', ({ to, data }) => {
-    const targetSocket = io.sockets.sockets.get(to);
-    if (!targetSocket || !socket.data.roomId || targetSocket.data.roomId !== socket.data.roomId) return;
-    io.to(to).emit('signal', { from: socket.id, data });
-  });
-
-  socket.on('share-status', ({ isSharing }) => {
-    const { roomId } = socket.data;
-    const room = roomId && rooms.get(roomId);
-    const info = room && room.get(socket.id);
-    if (!info) return;
-
-    info.sharing = Boolean(isSharing);
-    socket.to(roomId).emit('peer-share-status', { id: socket.id, isSharing: info.sharing });
-  });
-
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
-    const { roomId } = socket.data;
-    if (roomId && rooms.has(roomId)) {
-      const room = rooms.get(roomId);
-      room.delete(socket.id);
-      if (room.size === 0) rooms.delete(roomId);
-      socket.to(roomId).emit('peer-left', socket.id);
-    }
-  });
+  res.json({ token: await at.toJwt() });
 });
 
 const PORT = process.env.PORT || 3000;
@@ -97,4 +50,4 @@ server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
 
-module.exports = { app, server, io };
+module.exports = { app, server };

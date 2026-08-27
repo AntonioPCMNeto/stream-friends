@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { stopSharing } from './share.js';
-import { closeAllPeerConnections } from './peers.js';
+import { connectToRoom, disconnectFromRoom, onConnectionStateChanged, ConnectionState } from './livekit.js';
 import { refreshParticipants } from './participants.js';
 import { showToast } from './toast.js';
 
@@ -16,8 +16,6 @@ const copyRoomCodeBtn = document.getElementById('copyRoomCodeBtn');
 const copyLinkBtn = document.getElementById('copyLinkBtn');
 const leaveRoomBtn = document.getElementById('leaveRoomBtn');
 const connectionDot = document.getElementById('connectionDot');
-
-let socket = null;
 
 // Prefill the room code from a shared link, so a friend opening it only
 // has to type a name.
@@ -62,14 +60,27 @@ function applyReturningUserUX() {
 
 applyReturningUserUX();
 
-function enterRoom() {
+async function enterRoom() {
   const username = usernameInput.value.trim();
   if (!username) {
     lobbyError.textContent = 'Por favor, insira um nome.';
     return;
   }
 
-  state.roomId = roomCodeInput.value.trim() || crypto.randomUUID().slice(0, 8);
+  const roomId = roomCodeInput.value.trim() || crypto.randomUUID().slice(0, 8);
+  lobbyError.textContent = '';
+  enterBtn.disabled = true;
+
+  try {
+    await connectToRoom(roomId, username);
+  } catch (err) {
+    console.error('Failed to connect to room:', err);
+    lobbyError.textContent = 'Não foi possível entrar na sala. Verifique sua conexão e tente novamente.';
+    enterBtn.disabled = false;
+    return;
+  }
+
+  state.roomId = roomId;
   state.myUsername = username;
   state.hasEntered = true;
   saveUsername(username);
@@ -83,18 +94,13 @@ function enterRoom() {
 
   lobby.classList.add('hidden');
   appScreen.classList.remove('hidden');
-
-  if (socket.connected) {
-    socket.emit('join-room', { roomId: state.roomId, username: state.myUsername });
-  }
+  enterBtn.disabled = false;
 }
 
-// Tears down local media/connections and returns to the lobby. Reconnecting
-// the socket gives us a fresh id and lets the server's disconnect handler
-// clean up our old room membership and notify the peers we left.
+// Tears down local media/connections and returns to the lobby.
 function leaveRoom() {
   stopSharing();
-  closeAllPeerConnections();
+  disconnectFromRoom();
 
   state.hasEntered = false;
   state.roomId = null;
@@ -114,15 +120,11 @@ function leaveRoom() {
   lobbyError.textContent = '';
   roomCodeInput.value = '';
   applyReturningUserUX();
-
-  socket.disconnect();
-  socket.connect();
 }
 
-// Wires the lobby form and the room-join handshake on (re)connect.
-export function initLobby(theSocket) {
-  socket = theSocket;
-
+// Wires the lobby form and reflects LiveKit's own connection-state machine
+// (it handles reconnection internally — we just need to show it).
+export function initLobby() {
   enterBtn.addEventListener('click', enterRoom);
   usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
   roomCodeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
@@ -144,32 +146,23 @@ export function initLobby(theSocket) {
   });
 
   let hasConnectedBefore = false;
+  let wasConnected = false;
 
-  socket.on('connect', () => {
-    connectionDot.classList.add('connected');
-    connectionDot.classList.remove('disconnected');
-    connectionDot.title = 'Conectado';
-    if (state.hasEntered) {
-      // A reconnect after a dropped connection leaves stale peer state and
-      // dead RTCPeerConnections behind (the server never told us who left
-      // while we were offline) — clear them so the fresh existing-peers
-      // response rebuilds everyone from scratch instead of layering on top
-      // of ghosts.
-      closeAllPeerConnections();
-      state.knownPeers.clear();
-      state.peerUsernames.clear();
-      state.sharingPeers.clear();
-      refreshParticipants();
-      socket.emit('join-room', { roomId: state.roomId, username: state.myUsername });
-      if (hasConnectedBefore) showToast('Reconectado à sala.');
+  onConnectionStateChanged((connectionState) => {
+    const connected = connectionState === ConnectionState.Connected;
+    connectionDot.classList.toggle('connected', connected);
+    connectionDot.classList.toggle('disconnected', !connected);
+    connectionDot.title = connected
+      ? 'Conectado'
+      : connectionState === ConnectionState.Disconnected ? 'Desconectado' : 'Reconectando...';
+
+    if (connected && !wasConnected && hasConnectedBefore) {
+      showToast('Reconectado à sala.');
     }
-    hasConnectedBefore = true;
-  });
-
-  socket.on('disconnect', () => {
-    connectionDot.classList.remove('connected');
-    connectionDot.classList.add('disconnected');
-    connectionDot.title = 'Desconectado';
-    if (state.hasEntered) showToast('Conexão perdida. Reconectando...', 'error');
+    if (!connected && wasConnected && state.hasEntered) {
+      showToast('Conexão perdida. Reconectando...', 'error');
+    }
+    if (connected) hasConnectedBefore = true;
+    wasConnected = connected;
   });
 }
