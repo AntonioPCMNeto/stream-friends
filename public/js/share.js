@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { addOrUpdateTile, removeTile } from './tiles.js';
-import { callPeer, updateEncodingParams, announceSharingStatus } from './peers.js';
+import { callPeer, updateEncodingParams, announceSharingStatus, removeOutgoingTracks } from './peers.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 
@@ -37,8 +37,12 @@ function setSharingUI(sharing) {
 function openPanel() { sharePanel.classList.remove('hidden'); }
 function closePanel() { sharePanel.classList.add('hidden'); }
 
-// Stops our outgoing tracks. This also ends the corresponding remote track
-// on every peer's connection, so their tile disappears without extra signaling.
+// Stops our outgoing tracks. Stopping the local tracks alone doesn't tell
+// any peer connection anything — announceSharingStatus(false) is what
+// actually makes everyone's tile disappear immediately (peers.js acts on
+// it directly), while removeOutgoingTracks() cleans up the WebRTC side
+// (removes our senders and renegotiates) so restarting a share later
+// doesn't pile a new track on top of a stale one.
 // Safe to call even when not currently sharing (e.g. on room exit).
 export function stopSharing() {
   const wasSharing = !!state.localStream;
@@ -50,6 +54,7 @@ export function stopSharing() {
   removeTile('local');
   setSharingUI(false);
   if (wasSharing) {
+    removeOutgoingTracks();
     showToast('Compartilhamento de tela interrompido.');
     announceSharingStatus(false);
     refreshParticipants();
@@ -65,7 +70,13 @@ async function startSharing() {
 
   try {
     const framerate = Number(framerateGroup.dataset.value);
-    const videoConstraints = { frameRate: { ideal: framerate, max: framerate } };
+    // Screen capture is content-driven, not clock-driven — a static desktop
+    // legitimately produces far fewer than `framerate` new frames, and no
+    // constraint can force frames that were never captured. `min` is mostly
+    // advisory here (Chrome doesn't strictly enforce it for display capture
+    // the way it does for cameras), but it's honest about intent and costs
+    // nothing to set.
+    const videoConstraints = { frameRate: { min: framerate, ideal: framerate, max: framerate } };
 
     if (resolutionGroup.dataset.value !== 'auto') {
       const [width, height] = resolutionGroup.dataset.value.split('x').map(Number);
