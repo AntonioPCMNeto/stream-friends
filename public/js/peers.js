@@ -80,73 +80,20 @@ function viewerResolutionScale() {
   return 2;
 }
 
-// Closed-loop quality adaptation. viewerResolutionScale() above is a static
-// guess from peer count; this reacts to what the encoder actually reports
-// through qualityLimitationReason on the representative outbound stream (see
-// pollStats). On a sustained 'cpu'/'bandwidth' limit we step down — first an
-// extra resolution downscale, then a framerate cut — and step back up once
-// the encoder has run unconstrained for a while.
-//   level 0 = no extra limiting
-//   level 1 = extra 1.5x resolution downscale
-//   level 2 = level 1 + outgoing framerate capped at 20fps
-// pollStats runs every 2s, so these thresholds are ~4s to back off and ~16s
-// clean to recover — slow enough not to oscillate on a momentary spike.
-const MAX_ADAPT_LEVEL = 2;
-const ADAPT_DOWN_AFTER = 2;
-const ADAPT_UP_AFTER = 8;
-let adaptLevel = 0;
-let limitedStreak = 0;
-let cleanStreak = 0;
-
-function adaptResolutionScale() {
-  return adaptLevel >= 1 ? 1.5 : 1;
-}
-
-function adaptFramerateCap() {
-  return adaptLevel >= 2 ? 20 : null;
-}
-
-function resetAdaptation() {
-  adaptLevel = 0;
-  limitedStreak = 0;
-  cleanStreak = 0;
-}
-
-// Feeds the encoder's own limitation signal back into adaptLevel. Returns
-// true when the level changed, so the caller re-applies encoding params.
-function updateAdaptation(limitationReason) {
-  const limited = limitationReason === 'cpu' || limitationReason === 'bandwidth';
-  limitedStreak = limited ? limitedStreak + 1 : 0;
-  cleanStreak = limited ? 0 : cleanStreak + 1;
-
-  let next = adaptLevel;
-  if (limitedStreak >= ADAPT_DOWN_AFTER && adaptLevel < MAX_ADAPT_LEVEL) next = adaptLevel + 1;
-  else if (cleanStreak >= ADAPT_UP_AFTER && adaptLevel > 0) next = adaptLevel - 1;
-  if (next === adaptLevel) return false;
-
-  adaptLevel = next;
-  limitedStreak = 0;
-  cleanStreak = 0;
-  return true;
-}
-
-// Configures a video sender: bitrate cap (state.videoBitrateKbps — falsy
-// means no cap), the effective framerate cap (the lower of the user's
-// setting and any adaptation cap), a resolution scale combining the
-// viewer-count guess with the adaptation downscale, high network priority so
-// the screen stream wins contention, and 'maintain-framerate' degradation.
-// Screen-share content (games, video, scrolling) is motion-heavy, so a
-// steady framerate reads as smoother than a sharper but stuttery picture —
-// the default preference can sacrifice framerate to hold resolution, the
-// wrong tradeoff here.
+// Configures a video sender: bitrate/framerate caps (state.videoBitrateKbps /
+// state.videoFramerateFps — falsy bitrate means no cap), a viewer-count
+// resolution scale, high network priority so the screen stream wins
+// contention, and 'maintain-framerate' degradation. Screen-share content
+// (games, video, scrolling) is motion-heavy, so a steady framerate reads as
+// smoother than a sharper but stuttery picture — the default preference can
+// sacrifice framerate to hold resolution, the wrong tradeoff here.
 function applyEncodingParams(sender) {
   const params = sender.getParameters();
   if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
   const enc = params.encodings[0];
-  const fpsCaps = [state.videoFramerateFps, adaptFramerateCap()].filter(Boolean);
   enc.maxBitrate = state.videoBitrateKbps ? state.videoBitrateKbps * 1000 : undefined;
-  enc.maxFramerate = fpsCaps.length ? Math.min(...fpsCaps) : undefined;
-  enc.scaleResolutionDownBy = viewerResolutionScale() * adaptResolutionScale();
+  enc.maxFramerate = state.videoFramerateFps || undefined;
+  enc.scaleResolutionDownBy = viewerResolutionScale();
   enc.networkPriority = 'high';
   enc.priority = 'high';
   params.degradationPreference = 'maintain-framerate';
@@ -313,12 +260,7 @@ async function pollStats() {
     const reason = bestOutbound.qualityLimitationReason;
     let note = codecName ? ` · ${codecName}` : '';
     if (reason && reason !== 'none') note += ` · ⚠${reason}`; // 'cpu' or 'bandwidth'
-    if (adaptLevel > 0) note += ` · adapt L${adaptLevel}`;
     applyStatsSample('local', bestOutbound, 'bytesSent', note);
-
-    // React to the encoder's own limitation signal: back the resolution /
-    // framerate down when it's sustained-limited, restore when it clears.
-    if (updateAdaptation(reason)) updateEncodingParams();
 
     if (!encoderLogged && bestOutbound.encoderImplementation) {
       encoderLogged = true;
@@ -371,7 +313,6 @@ export async function callPeer(peerId) {
 // parallel m-line on top of the still-registered old one).
 export function removeOutgoingTracks() {
   encoderLogged = false; // re-log codec/encoder on the next share
-  resetAdaptation(); // next share starts unthrottled
   stopFrameCounter();
   peerConnections.forEach((pc, peerId) => {
     const activeSenders = pc.getSenders().filter((sender) => sender.track);
