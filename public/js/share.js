@@ -71,15 +71,23 @@ async function startSharing() {
 
   try {
     const framerate = Number(framerateGroup.dataset.value);
-    // Only `ideal`/`max` here — getDisplayMedia throws on `min` (and `exact`)
-    // frameRate constraints ("min constraints are not supported"), which
-    // aborts the whole capture. A floor would be meaningless anyway: screen
-    // capture is content-driven, so a static desktop legitimately produces
-    // far fewer frames than `framerate` and no constraint can conjure frames
-    // that were never captured.
-    const videoConstraints = { frameRate: { ideal: framerate, max: framerate } };
+    // `ideal` only. A hard `max` makes the OS screen-capturer do its own
+    // frame-rate limiting, which delivers frames unevenly; the encoder's
+    // maxFramerate (peers.js) is a smoother ceiling. `min`/`exact` throw and
+    // abort the capture, and a floor is meaningless anyway — screen capture
+    // is content-driven, so a static screen legitimately produces fewer
+    // frames than requested and no constraint can conjure the missing ones.
+    const videoConstraints = { frameRate: { ideal: framerate } };
 
-    if (resolutionGroup.dataset.value !== 'auto') {
+    if (resolutionGroup.dataset.value === 'auto') {
+      // "Origem": capture at the streamer's real display resolution.
+      // Unconstrained, Chrome/Electron usually hand back a downscaled buffer
+      // (often 1920×1080). Requesting the physical pixel size as `ideal` gets
+      // the native panel resolution for a full-screen share without forcing
+      // an upscale of a smaller source (a single window or tab).
+      videoConstraints.width = { ideal: Math.round(screen.width * devicePixelRatio) };
+      videoConstraints.height = { ideal: Math.round(screen.height * devicePixelRatio) };
+    } else {
       const [width, height] = resolutionGroup.dataset.value.split('x').map(Number);
       videoConstraints.width = { ideal: width };
       videoConstraints.height = { ideal: height };

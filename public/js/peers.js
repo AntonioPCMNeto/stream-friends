@@ -69,31 +69,21 @@ export function closeAllPeerConnections() {
   Array.from(peerConnections.keys()).forEach(closePeerConnection);
 }
 
-// In a mesh each viewer gets an independent encode of the same screen, so
-// total encode cost scales with viewer count. Past a few viewers, dropping
-// the sent resolution keeps every stream's framerate alive instead of the
-// encoder thrashing on all of them. Small sessions stay at full resolution.
-function viewerResolutionScale() {
-  const n = peerConnections.size;
-  if (n <= 2) return 1;
-  if (n <= 4) return 1.5;
-  return 2;
-}
-
-// Configures a video sender: bitrate/framerate caps (state.videoBitrateKbps /
-// state.videoFramerateFps — falsy bitrate means no cap), a viewer-count
-// resolution scale, high network priority so the screen stream wins
-// contention, and 'maintain-framerate' degradation. Screen-share content
+// Configures a video sender. The sent resolution is exactly what was
+// captured (`scaleResolutionDownBy = 1`) — no proactive downscaling, so the
+// picture doesn't silently shrink when another viewer joins. Under genuine
+// encoder overload 'maintain-framerate' still lets WebRTC shed resolution,
+// but only then, and it sheds resolution rather than frames: screen content
 // (games, video, scrolling) is motion-heavy, so a steady framerate reads as
-// smoother than a sharper but stuttery picture — the default preference can
-// sacrifice framerate to hold resolution, the wrong tradeoff here.
+// smoother than a sharper but stuttering picture. maxFramerate / maxBitrate
+// are the user's share-panel choices (falsy bitrate = no cap).
 function applyEncodingParams(sender) {
   const params = sender.getParameters();
   if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
   const enc = params.encodings[0];
   enc.maxBitrate = state.videoBitrateKbps ? state.videoBitrateKbps * 1000 : undefined;
   enc.maxFramerate = state.videoFramerateFps || undefined;
-  enc.scaleResolutionDownBy = viewerResolutionScale();
+  enc.scaleResolutionDownBy = 1;
   enc.networkPriority = 'high';
   enc.priority = 'high';
   params.degradationPreference = 'maintain-framerate';
@@ -169,9 +159,34 @@ function applyStatsSample(key, report, bytesField, note = '') {
   updateTileStats(key, `${report.frameWidth}×${report.frameHeight} · ${fps}fps · ${kbps}kbps${note}`);
 }
 
-// Logged once, the first time we see an outbound video encode — confirms
-// which codec and encoder (hardware vs software) actually got negotiated.
-let encoderLogged = false;
+// Stream diagnostics. `streamUpLogged` fires one line the first time an
+// outbound encode appears (codec + hardware/software encoder). `lastLimitLog`
+// then drives a line whenever the encoder's quality-limitation state changes
+// and every ~10s it persists, plus once when it clears — so a single console
+// line answers whether a framerate drop is cpu, bandwidth, or just static
+// content. Reset on stop-share.
+let streamUpLogged = false;
+let lastLimitLog = { reason: 'none', at: 0 };
+
+function logStreamDiag(report, codecName) {
+  const reason = report.qualityLimitationReason || 'none';
+  const now = performance.now();
+  const changed = reason !== lastLimitLog.reason;
+  const persisted = reason !== 'none' && now - lastLimitLog.at > 10000;
+  if (!changed && !persisted) return;
+  lastLimitLog = { reason, at: now };
+
+  const fps = Math.round(report.framesPerSecond || 0);
+  const msPerFrame = report.framesEncoded && report.totalEncodeTime
+    ? (report.totalEncodeTime * 1000 / report.framesEncoded).toFixed(1)
+    : '?';
+  const targetKbps = report.targetBitrate ? Math.round(report.targetBitrate / 1000) : '?';
+  console.log(
+    `[stream] ${report.frameWidth}x${report.frameHeight} ${fps}fps limit=${reason} ` +
+    `encode=${msPerFrame}ms/frame target=${targetKbps}kbps codec=${codecName} ` +
+    `encoder=${report.encoderImplementation || '?'} viewers=${peerConnections.size}`
+  );
+}
 
 // Live capture-framerate measurement for the solo-sharer tile (no viewer =
 // no outbound RTP to read framesPerSecond from). Counts frames straight off
@@ -262,10 +277,11 @@ async function pollStats() {
     if (reason && reason !== 'none') note += ` · ⚠${reason}`; // 'cpu' or 'bandwidth'
     applyStatsSample('local', bestOutbound, 'bytesSent', note);
 
-    if (!encoderLogged && bestOutbound.encoderImplementation) {
-      encoderLogged = true;
-      console.log(`[stream] codec=${codecName} encoder=${bestOutbound.encoderImplementation} scale=${bestOutbound.scalabilityMode || viewerResolutionScale() + 'x'}`);
+    if (!streamUpLogged && bestOutbound.encoderImplementation) {
+      streamUpLogged = true;
+      console.log(`[stream] up: ${bestOutbound.frameWidth}x${bestOutbound.frameHeight} codec=${codecName} encoder=${bestOutbound.encoderImplementation} viewers=${peerConnections.size}`);
     }
+    logStreamDiag(bestOutbound, codecName);
   } else if (state.localStream) {
     // No viewer connected — no outbound RTP. Read resolution off the capture
     // track and the live framerate off the frame counter (nominal rate for
@@ -312,7 +328,8 @@ export async function callPeer(peerId) {
 // we start sharing again later (addTrack would otherwise add a second,
 // parallel m-line on top of the still-registered old one).
 export function removeOutgoingTracks() {
-  encoderLogged = false; // re-log codec/encoder on the next share
+  streamUpLogged = false; // re-log codec/encoder on the next share
+  lastLimitLog = { reason: 'none', at: 0 };
   stopFrameCounter();
   peerConnections.forEach((pc, peerId) => {
     const activeSenders = pc.getSenders().filter((sender) => sender.track);
@@ -338,18 +355,18 @@ export function initPeerSignaling(theSocket) {
       if (sharing) state.sharingPeers.add(id);
     });
     if (state.isSharing) {
-      Promise.all(peers.map(({ id }) => callPeer(id))).then(updateEncodingParams);
+      peers.forEach(({ id }) => callPeer(id));
     }
     refreshParticipants();
   });
 
-  // A peer joined after us — call them if we're already sharing, then
-  // re-apply encoding params everywhere (the higher viewer count may lower
-  // the sent resolution for every stream).
+  // A peer joined after us — open a connection and offer our screen if we're
+  // already sharing. Encoding params are the same regardless of viewer count,
+  // so callPeer configuring the new sender is all that's needed.
   socket.on('viewer-joined', ({ id, username }) => {
     state.knownPeers.add(id);
     state.peerUsernames.set(id, username);
-    if (state.isSharing) callPeer(id).then(updateEncodingParams);
+    if (state.isSharing) callPeer(id);
     showToast(`${username} entrou na sala`);
     refreshParticipants();
   });
@@ -360,7 +377,6 @@ export function initPeerSignaling(theSocket) {
     state.peerUsernames.delete(peerId);
     state.sharingPeers.delete(peerId);
     closePeerConnection(peerId);
-    updateEncodingParams(); // fewer viewers — resolution can scale back up
     showToast(`${username} saiu da sala`);
     refreshParticipants();
   });
