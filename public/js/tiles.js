@@ -13,6 +13,33 @@ function toggleFullscreen(el) {
   }
 }
 
+// Fades the overlay and nav arrows (and hides the cursor) once the pointer
+// sits still for a couple of seconds, the way YouTube/Discord players do.
+// Any movement brings them back; leaving the tile hides them immediately;
+// holding the pointer down (dragging the volume slider) keeps them up.
+function initAutoHide(tile) {
+  let timer;
+  let held = false;
+  const arm = () => {
+    clearTimeout(timer);
+    if (held) return;
+    timer = setTimeout(() => tile.classList.add('controls-hidden'), 2500);
+  };
+  const show = () => {
+    tile.classList.remove('controls-hidden');
+    arm();
+  };
+  tile.addEventListener('pointermove', show);
+  tile.addEventListener('pointerdown', () => { held = true; show(); });
+  tile.addEventListener('pointerup', () => { held = false; arm(); });
+  tile.addEventListener('pointerleave', () => {
+    if (held) return;
+    clearTimeout(timer);
+    tile.classList.add('controls-hidden');
+  });
+  show();
+}
+
 // Switches directly to the next/previous tile's fullscreen — calling
 // requestFullscreen() on a different element while one is already
 // fullscreen swaps to it directly, no exitFullscreen() round-trip needed.
@@ -110,6 +137,20 @@ export function addOrUpdateTile(key, stream, label, isLocal) {
       actions.appendChild(pipBtn);
     }
 
+    // Toggles the resolution/fps/bitrate badge. Off by default — it's
+    // diagnostic detail, not something to stare at during a normal watch.
+    const infoBtn = document.createElement('button');
+    infoBtn.className = 'icon-btn';
+    infoBtn.title = 'Informações do stream';
+    infoBtn.setAttribute('aria-label', 'Informações do stream');
+    infoBtn.setAttribute('aria-pressed', 'false');
+    infoBtn.textContent = 'ℹ️';
+    infoBtn.onclick = () => {
+      const on = tile.classList.toggle('stats-visible');
+      infoBtn.setAttribute('aria-pressed', String(on));
+    };
+    actions.appendChild(infoBtn);
+
     const fullscreenBtn = document.createElement('button');
     fullscreenBtn.className = 'icon-btn';
     fullscreenBtn.title = 'Tela cheia';
@@ -141,6 +182,7 @@ export function addOrUpdateTile(key, stream, label, isLocal) {
     tile.appendChild(overlay);
 
     videosContainer.appendChild(tile);
+    initAutoHide(tile);
     tiles.set(key, tile);
   }
 

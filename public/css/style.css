@@ -314,6 +314,14 @@ main {
   justify-content: space-between;
   gap: 8px;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
+  transition: opacity 0.25s ease;
+}
+/* Auto-hide after pointer inactivity (see initAutoHide in tiles.js). */
+.tile.controls-hidden { cursor: none; }
+.tile.controls-hidden .tile-overlay,
+.tile.controls-hidden .tile-nav {
+  opacity: 0;
+  pointer-events: none;
 }
 .tile-label {
   font-size: 13px;
@@ -334,8 +342,10 @@ main {
   padding: 4px 9px;
   border-radius: 999px;
   pointer-events: none;
+  display: none;
 }
-.tile-stats:empty { display: none; }
+/* Shown only when toggled on via the ℹ️ button, and never as an empty pill. */
+.tile.stats-visible .tile-stats:not(:empty) { display: block; }
 
 .tile-nav {
   display: none;
@@ -352,7 +362,7 @@ main {
   cursor: pointer;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s;
+  transition: background 0.15s, opacity 0.25s ease;
 }
 .tile-nav:hover { background: rgba(0, 0, 0, 0.75); }
 .tile-nav.prev { left: 16px; }
