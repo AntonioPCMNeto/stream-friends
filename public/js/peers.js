@@ -152,6 +152,12 @@ async function pollStats() {
   inboundByPeer.forEach((report, peerId) => applyStatsSample(peerId, report, 'bytesReceived'));
 }
 
+async function sendOffer(pc, peerId) {
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  socket.emit('signal', { to: peerId, data: { type: 'offer', sdp: offer } });
+}
+
 // HOST SIDE: open a connection to a peer and offer our screen stream
 export async function callPeer(peerId) {
   if (!state.localStream) return;
@@ -163,9 +169,26 @@ export async function callPeer(peerId) {
       preferH264(pc, sender);
     }
   });
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  socket.emit('signal', { to: peerId, data: { type: 'offer', sdp: offer } });
+  await sendOffer(pc, peerId);
+}
+
+// Called when we stop sharing. Just calling track.stop() on our local
+// stream (which share.js already does) only stops capture on our end — it
+// doesn't tell the peer connection anything, so the remote side never
+// learns the track is gone and its <video> just keeps showing the last
+// decoded frame forever. Explicitly removing our senders and renegotiating
+// is what actually signals "this track is gone" at the WebRTC level, and
+// it also prevents dead senders from piling up on the same connection if
+// we start sharing again later (addTrack would otherwise add a second,
+// parallel m-line on top of the still-registered old one).
+export function removeOutgoingTracks() {
+  peerConnections.forEach((pc, peerId) => {
+    const activeSenders = pc.getSenders().filter((sender) => sender.track);
+    if (activeSenders.length === 0) return;
+
+    activeSenders.forEach((sender) => pc.removeTrack(sender));
+    sendOffer(pc, peerId).catch((err) => console.error('Failed to renegotiate after stopping share:', err));
+  });
 }
 
 // Wires the room-presence and WebRTC signaling events relayed by the server.
@@ -205,9 +228,20 @@ export function initPeerSignaling(theSocket) {
     refreshParticipants();
   });
 
-  // Someone else started or stopped sharing their screen.
+  // Someone else started or stopped sharing their screen. This is the
+  // authoritative, immediate signal that a stop happened — we don't wait on
+  // the renegotiation triggered by removeOutgoingTracks() (which the peer
+  // who stopped sharing sends separately) since that's slower and, unlike
+  // this app-level event, not guaranteed to arrive at all if something
+  // goes wrong mid-renegotiation.
   socket.on('peer-share-status', ({ id, isSharing }) => {
-    if (isSharing) state.sharingPeers.add(id); else state.sharingPeers.delete(id);
+    if (isSharing) {
+      state.sharingPeers.add(id);
+    } else {
+      state.sharingPeers.delete(id);
+      removeTile(id);
+      lastStatsSample.delete(id);
+    }
     refreshParticipants();
   });
 
