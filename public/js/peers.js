@@ -159,16 +159,39 @@ function applyStatsSample(key, report, bytesField, note = '') {
   updateTileStats(key, `${report.frameWidth}×${report.frameHeight} · ${fps}fps · ${kbps}kbps${note}`);
 }
 
+// Pulls the active ICE path off a getStats() map: whether media is going
+// direct or **relayed through a TURN server** (the free Open Relay one in
+// iceServers.js is shared and bandwidth-throttled — a relayed path caps
+// throughput hard regardless of the user's real uplink), plus WebRTC's own
+// send-bandwidth estimate and the round-trip time.
+function activePathInfo(statsMap) {
+  let pair = null;
+  statsMap.forEach((r) => {
+    if (r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pair = r;
+  });
+  if (!pair) return null;
+  const local = statsMap.get(pair.localCandidateId);
+  const remote = statsMap.get(pair.remoteCandidateId);
+  const relayed = local?.candidateType === 'relay' || remote?.candidateType === 'relay';
+  return {
+    relayed,
+    kind: relayed ? `relay(${local?.relayProtocol || '?'})` : `${local?.candidateType || '?'}/${remote?.candidateType || '?'}`,
+    abrKbps: pair.availableOutgoingBitrate ? Math.round(pair.availableOutgoingBitrate / 1000) : null,
+    rttMs: pair.currentRoundTripTime != null ? Math.round(pair.currentRoundTripTime * 1000) : null,
+  };
+}
+
 // Stream diagnostics. `streamUpLogged` fires one line the first time an
-// outbound encode appears (codec + hardware/software encoder). `lastLimitLog`
-// then drives a line whenever the encoder's quality-limitation state changes
-// and every ~10s it persists, plus once when it clears — so a single console
-// line answers whether a framerate drop is cpu, bandwidth, or just static
+// outbound encode appears (codec, encoder, ICE path). `lastLimitLog` then
+// drives a line whenever the encoder's quality-limitation state changes and
+// every ~10s it persists, plus once when it clears — so a single console
+// line answers whether a framerate/resolution drop is cpu, bandwidth (and if
+// so, a throttled TURN relay vs a genuinely thin uplink), or just static
 // content. Reset on stop-share.
 let streamUpLogged = false;
 let lastLimitLog = { reason: 'none', at: 0 };
 
-function logStreamDiag(report, codecName) {
+function logStreamDiag(report, codecName, path) {
   const reason = report.qualityLimitationReason || 'none';
   const now = performance.now();
   const changed = reason !== lastLimitLog.reason;
@@ -181,9 +204,12 @@ function logStreamDiag(report, codecName) {
     ? (report.totalEncodeTime * 1000 / report.framesEncoded).toFixed(1)
     : '?';
   const targetKbps = report.targetBitrate ? Math.round(report.targetBitrate / 1000) : '?';
+  const pathStr = path
+    ? `path=${path.kind} estBW=${path.abrKbps ?? '?'}kbps rtt=${path.rttMs ?? '?'}ms`
+    : 'path=?';
   console.log(
     `[stream] ${report.frameWidth}x${report.frameHeight} ${fps}fps limit=${reason} ` +
-    `encode=${msPerFrame}ms/frame target=${targetKbps}kbps codec=${codecName} ` +
+    `encode=${msPerFrame}ms/frame target=${targetKbps}kbps ${pathStr} codec=${codecName} ` +
     `encoder=${report.encoderImplementation || '?'} viewers=${peerConnections.size}`
   );
 }
@@ -273,15 +299,17 @@ async function pollStats() {
     stopFrameCounter(); // RTP path reports real fps now — drop the frame-counter clone
     const codecName = bestOutboundReport.get(bestOutbound.codecId)?.mimeType?.split('/')[1];
     const reason = bestOutbound.qualityLimitationReason;
+    const path = activePathInfo(bestOutboundReport);
     let note = codecName ? ` · ${codecName}` : '';
     if (reason && reason !== 'none') note += ` · ⚠${reason}`; // 'cpu' or 'bandwidth'
+    if (path?.relayed) note += ' · relay';
     applyStatsSample('local', bestOutbound, 'bytesSent', note);
 
     if (!streamUpLogged && bestOutbound.encoderImplementation) {
       streamUpLogged = true;
-      console.log(`[stream] up: ${bestOutbound.frameWidth}x${bestOutbound.frameHeight} codec=${codecName} encoder=${bestOutbound.encoderImplementation} viewers=${peerConnections.size}`);
+      console.log(`[stream] up: ${bestOutbound.frameWidth}x${bestOutbound.frameHeight} codec=${codecName} encoder=${bestOutbound.encoderImplementation} path=${path?.kind || '?'} viewers=${peerConnections.size}`);
     }
-    logStreamDiag(bestOutbound, codecName);
+    logStreamDiag(bestOutbound, codecName, path);
   } else if (state.localStream) {
     // No viewer connected — no outbound RTP. Read resolution off the capture
     // track and the live framerate off the frame counter (nominal rate for
