@@ -3,6 +3,7 @@ import { stopSharing } from './share.js';
 import { closeAllPeerConnections } from './peers.js';
 import { refreshParticipants } from './participants.js';
 import { showToast } from './toast.js';
+import { clearChat } from './chat.js';
 
 const lobby = document.getElementById('lobby');
 const appScreen = document.getElementById('appScreen');
@@ -104,6 +105,7 @@ function leaveRoom() {
   state.peerUsernames.clear();
   state.sharingPeers.clear();
   refreshParticipants();
+  clearChat();
 
   const url = new URL(window.location.href);
   url.searchParams.delete('room');

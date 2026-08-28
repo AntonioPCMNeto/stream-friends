@@ -49,6 +49,13 @@
             </div>
           </div>
 
+          <div class="chat-control">
+            <button id="chatToggleBtn" class="btn btn-ghost" aria-label="Chat">
+              💬 Chat
+              <span id="chatBadge" class="chat-badge hidden">0</span>
+            </button>
+          </div>
+
           <button id="copyLinkBtn" class="btn btn-ghost">🔗 Copiar link</button>
 
           <div class="share-control">
@@ -98,6 +105,18 @@
       </div>
 
       <div id="videos" class="video-grid"></div>
+
+      <div id="chatPanel" class="chat-panel hidden">
+        <div class="chat-panel-header">
+          <span>Chat</span>
+          <button id="chatCloseBtn" class="chat-close-btn" aria-label="Fechar chat">✕</button>
+        </div>
+        <div id="chatMessages" class="chat-messages"></div>
+        <div class="chat-input-row">
+          <input id="chatInput" type="text" placeholder="Mensagem..." maxlength="500">
+          <button id="chatSendBtn" class="btn btn-primary">Enviar</button>
+        </div>
+      </div>
     </div>
   </main>
 
