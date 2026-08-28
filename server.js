@@ -23,6 +23,7 @@ const rooms = new Map();
 
 const MAX_ROOM_ID_LENGTH = 64;
 const MAX_USERNAME_LENGTH = 50;
+const MAX_CHAT_MESSAGE_LENGTH = 500;
 
 function isValidRoomId(roomId) {
   return typeof roomId === 'string' && roomId.length > 0 && roomId.length <= MAX_ROOM_ID_LENGTH;
@@ -30,6 +31,10 @@ function isValidRoomId(roomId) {
 
 function isValidUsername(username) {
   return typeof username === 'string' && username.trim().length > 0 && username.length <= MAX_USERNAME_LENGTH;
+}
+
+function isValidChatMessage(text) {
+  return typeof text === 'string' && text.trim().length > 0 && text.length <= MAX_CHAT_MESSAGE_LENGTH;
 }
 
 io.on('connection', (socket) => {
@@ -87,6 +92,15 @@ io.on('connection', (socket) => {
     const targetSocket = io.sockets.sockets.get(to);
     if (!targetSocket || !socket.data.roomId || targetSocket.data.roomId !== socket.data.roomId) return;
     io.to(to).emit('watch-status', { from: socket.id, watching: Boolean(watching) });
+  });
+
+  // Room-wide text chat. Echoed back to the sender too (io.to, not
+  // socket.to) so rendering has a single path — the client tells its own
+  // messages apart from others' by comparing `from` to its own socket id.
+  socket.on('chat-message', ({ text }) => {
+    const { roomId, username } = socket.data;
+    if (!roomId || !isValidChatMessage(text)) return;
+    io.to(roomId).emit('chat-message', { from: socket.id, username, text: text.trim(), ts: Date.now() });
   });
 
   socket.on('disconnect', () => {
