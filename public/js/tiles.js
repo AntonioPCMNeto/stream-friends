@@ -43,11 +43,12 @@ function initAutoHide(tile) {
   show();
 }
 
-// Switches directly to the next/previous tile's fullscreen — calling
-// requestFullscreen() on a different element while one is already
-// fullscreen swaps to it directly, no exitFullscreen() round-trip needed.
-// Wraps around; a no-op with a single tile (only element cycles to itself).
-function switchFullscreen(direction) {
+// Switches to the next/previous tile's fullscreen. Wraps around; a no-op with
+// a single tile. Exits first, then re-enters: calling requestFullscreen() on a
+// second element while one is already fullscreen *stacks* it rather than
+// swapping, so a later exitFullscreen() pops back to the previous tile instead
+// of returning to the grid.
+async function switchFullscreen(direction) {
   const current = document.fullscreenElement;
   if (!current) return;
 
@@ -56,8 +57,28 @@ function switchFullscreen(direction) {
   if (currentIndex === -1) return;
 
   const nextIndex = (currentIndex + direction + keys.length) % keys.length;
-  tiles.get(keys[nextIndex]).requestFullscreen();
+  const next = tiles.get(keys[nextIndex]);
+  if (next === current) return;
+
+  try {
+    await document.exitFullscreen();
+    await next.requestFullscreen();
+  } catch (err) {
+    // Transient activation may not survive the exit; dropping to the grid is
+    // an acceptable fallback.
+    console.error('Failed to switch fullscreen tile:', err);
+  }
 }
+
+// `f` exits fullscreen too, alongside the browser's native Esc. Ignored while
+// typing into an input so it doesn't eat the keystroke.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'f' && e.key !== 'F') return;
+  if (!document.fullscreenElement) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  document.exitFullscreen();
+});
 
 // Builds one video tile (your own preview or a remote streamer's). Tiles
 // always start muted — Chrome blocks unmuted autoplay without a prior user
