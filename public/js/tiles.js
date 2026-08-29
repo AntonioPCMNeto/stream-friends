@@ -114,9 +114,25 @@ function createTile(isLocal, key) {
   actions.className = 'tile-actions';
 
   if (!isLocal) {
+    const muteBtn = document.createElement('button');
+    muteBtn.className = 'icon-btn';
+    muteBtn.title = 'Mudo';
+    muteBtn.setAttribute('aria-label', 'Mudo');
+    muteBtn.textContent = '🔇';
+
+    const applyMuted = (muted) => {
+      video.muted = muted;
+      const label = muted ? 'Ativar som' : 'Mudo';
+      muteBtn.textContent = muted ? '🔇' : '🔊';
+      muteBtn.title = label;
+      muteBtn.setAttribute('aria-label', label);
+    };
+    muteBtn.onclick = () => applyMuted(!video.muted);
+
     // Tell the sharer to stop / resume sending us this screen. While hidden
     // they encode nothing for us — it's a real bandwidth + CPU cut on both
-    // ends, not just a UI hide.
+    // ends, not just a UI hide. Hiding also mutes the audio (which keeps
+    // arriving) and un-hiding restores whatever mute state you had before.
     const watchBtn = document.createElement('button');
     watchBtn.className = 'icon-btn';
     watchBtn.title = 'Ocultar stream';
@@ -127,29 +143,23 @@ function createTile(isLocal, key) {
     hiddenCover.className = 'stream-hidden-cover';
     hiddenCover.textContent = 'Stream oculto — clique para mostrar';
 
+    let mutedBeforeHide = true;
     const toggleHidden = () => {
       const hidden = tile.classList.toggle('stream-hidden');
       watchBtn.textContent = hidden ? '🚫' : '👁';
       watchBtn.title = hidden ? 'Mostrar stream' : 'Ocultar stream';
       watchBtn.setAttribute('aria-label', watchBtn.title);
+      if (hidden) {
+        mutedBeforeHide = video.muted;
+        applyMuted(true);
+      } else {
+        applyMuted(mutedBeforeHide);
+      }
       setWatching(key, !hidden);
     };
     watchBtn.onclick = toggleHidden;
     hiddenCover.onclick = toggleHidden;
     actions.appendChild(watchBtn);
-
-    const muteBtn = document.createElement('button');
-    muteBtn.className = 'icon-btn';
-    muteBtn.title = 'Mudo';
-    muteBtn.setAttribute('aria-label', 'Mudo');
-    muteBtn.textContent = '🔇';
-    muteBtn.onclick = () => {
-      video.muted = !video.muted;
-      const label = video.muted ? 'Ativar som' : 'Mudo';
-      muteBtn.textContent = video.muted ? '🔇' : '🔊';
-      muteBtn.title = label;
-      muteBtn.setAttribute('aria-label', label);
-    };
     actions.appendChild(muteBtn);
 
     const volumeSlider = document.createElement('input');
