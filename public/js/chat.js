@@ -1,6 +1,7 @@
 const MAX_MESSAGE_LENGTH = 500;
 
 const toggleBtn = document.getElementById('chatToggleBtn');
+const launcher = document.querySelector('.chat-control');
 const badge = document.getElementById('chatBadge');
 const panel = document.getElementById('chatPanel');
 const closeBtn = document.getElementById('chatCloseBtn');
@@ -26,10 +27,14 @@ function setUnread(count) {
 // button or Escape.
 function openPanel() {
   panel.classList.remove('hidden');
+  launcher.classList.add('hidden'); // the panel opens in the launcher's own corner
   setUnread(0);
   input.focus();
 }
-function closePanel() { panel.classList.add('hidden'); }
+function closePanel() {
+  panel.classList.add('hidden');
+  launcher.classList.remove('hidden');
+}
 
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

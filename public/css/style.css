@@ -62,8 +62,12 @@ main {
 .btn-primary { background: var(--accent); color: white; }
 .btn-primary:hover { background: var(--accent-hover); }
 .btn-primary:disabled { background: #444; cursor: not-allowed; }
-.btn-ghost { background: transparent; border-color: var(--border); color: var(--text-dim); }
-.btn-ghost:hover { color: var(--text); border-color: var(--accent); }
+/* Filled (not transparent) so each ghost button reads as its own control
+   against the room bar's background instead of blending into one flat
+   strip — transparent + a border barely lighter than --surface was too low
+   contrast to look like distinct buttons. */
+.btn-ghost { background: var(--surface-2); border-color: var(--border); color: var(--text-dim); }
+.btn-ghost:hover { background: #262632; color: var(--text); border-color: var(--accent); }
 .btn-danger { background: #ef4444; color: white; }
 .btn-danger:hover { background: #f16060; }
 
@@ -171,32 +175,63 @@ main {
 .copy-code-btn {
   background: none;
   border: none;
-  padding: 4px;
+  border-radius: 6px;
+  padding: 4px 6px;
   font-size: 14px;
   line-height: 1;
   color: var(--text-dim);
   cursor: pointer;
   display: inline-flex;
-  transition: color 0.15s;
+  transition: color 0.15s, background 0.15s;
 }
-.copy-code-btn:hover { color: var(--accent); }
+.copy-code-btn:hover { color: var(--accent); background: var(--surface-2); }
 
-.share-control, .participants-control, .chat-control { position: relative; }
+.share-control, .participants-control { position: relative; }
+
+/* Floating launcher (not in normal flow — see index.html), same corner the
+   chat panel itself opens in; hidden while the panel is open so the two
+   never overlap (see openPanel/closePanel in chat.js). */
+.chat-control {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 41;
+}
+.chat-control.hidden { display: none; }
+#chatToggleBtn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  color: white;
+  font-size: 24px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 8px 28px rgba(99, 102, 241, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+#chatToggleBtn:hover { transform: scale(1.06); box-shadow: 0 10px 32px rgba(99, 102, 241, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08) inset; }
+#chatToggleBtn:active { transform: scale(0.96); }
 
 .chat-badge {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  min-width: 16px;
-  height: 16px;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
   padding: 0 4px;
   border-radius: 999px;
   background: var(--danger);
   color: white;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  line-height: 16px;
+  line-height: 18px;
   text-align: center;
+  box-shadow: 0 0 0 2px var(--bg);
 }
 .chat-badge.hidden { display: none; }
 
@@ -207,7 +242,7 @@ main {
   position: fixed;
   right: 20px;
   bottom: 20px;
-  z-index: 40;
+  z-index: 42;
   width: 320px;
   max-width: calc(100vw - 40px);
   height: 420px;

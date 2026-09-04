@@ -52,13 +52,6 @@
             </div>
           </div>
 
-          <div class="chat-control">
-            <button id="chatToggleBtn" class="btn btn-ghost" aria-label="Chat">
-              💬 Chat
-              <span id="chatBadge" class="chat-badge hidden">0</span>
-            </button>
-          </div>
-
           <button id="copyLinkBtn" class="btn btn-ghost">🔗 Copiar link</button>
 
           <button id="startWebcamBtn" class="btn btn-ghost">📷 Compartilhar Webcam</button>
@@ -110,6 +103,17 @@
       </div>
 
       <div id="videos" class="video-grid"></div>
+
+      <!-- Floating launcher, not part of the room bar — chat is a separate,
+           always-reachable corner of the screen rather than one more item
+           competing for space in the toolbar. Hidden while the panel itself
+           is open (chat.js toggles the wrapper's .hidden class). -->
+      <div class="chat-control">
+        <button id="chatToggleBtn" aria-label="Chat">
+          💬
+          <span id="chatBadge" class="chat-badge hidden">0</span>
+        </button>
+      </div>
 
       <div id="chatPanel" class="chat-panel hidden">
         <div class="chat-panel-header">
