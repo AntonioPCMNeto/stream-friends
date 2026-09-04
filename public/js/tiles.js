@@ -80,6 +80,13 @@ document.addEventListener('keydown', (e) => {
   document.exitFullscreen();
 });
 
+// Tile key is `local:screen`, `local:webcam`, or `${peerId}:screen` /
+// `${peerId}:webcam` — mirrors the connKey scheme in peers.js. Returns the
+// purpose ('screen'/'webcam') and, for remote tiles, the peer id.
+function purposeOfKey(key) {
+  return key.slice(key.lastIndexOf(':') + 1);
+}
+
 // Builds one video tile (your own preview or a remote streamer's). Tiles
 // always start muted — Chrome blocks unmuted autoplay without a prior user
 // gesture, which a friend just opening the room link won't have given yet.
@@ -114,6 +121,9 @@ function createTile(isLocal, key) {
   actions.className = 'tile-actions';
 
   if (!isLocal) {
+    const peerId = key.slice(0, key.lastIndexOf(':'));
+    const purpose = purposeOfKey(key);
+
     const muteBtn = document.createElement('button');
     muteBtn.className = 'icon-btn';
     muteBtn.title = 'Mudo';
@@ -155,7 +165,7 @@ function createTile(isLocal, key) {
       } else {
         applyMuted(mutedBeforeHide);
       }
-      setWatching(key, !hidden);
+      setWatching(peerId, purpose, !hidden);
     };
     watchBtn.onclick = toggleHidden;
     hiddenCover.onclick = toggleHidden;
@@ -248,25 +258,38 @@ function createTile(isLocal, key) {
   return tile;
 }
 
-// Reconciles the tile grid against current state: the local preview while
-// we're sharing (state.localStream) plus one tile per inbound stream
-// (state.streams). Idempotent — call it after any change that adds or drops
-// a stream. Existing tile nodes are reused, so playback / PiP / volume / the
-// stats toggle are never interrupted by a re-render.
+const PURPOSE_LABEL = { screen: 'Tela', webcam: 'Webcam' };
+
+// Reconciles the tile grid against current state: a local preview per active
+// outgoing stream (state.screenStream / state.webcamStream — either, both,
+// or neither may be live) plus one tile per inbound stream (state.streams,
+// keyed `${peerId}:${purpose}`). Idempotent — call it after any change that
+// adds or drops a stream. Existing tile nodes are reused, so playback / PiP
+// / volume / the stats toggle are never interrupted by a re-render.
 export function renderTiles() {
   const desired = new Map(); // key -> { stream, label, isLocal }
 
-  if (state.localStream) {
-    desired.set('local', {
-      stream: state.localStream,
-      label: `Você (${state.myUsername})`,
+  if (state.screenStream) {
+    desired.set('local:screen', {
+      stream: state.screenStream,
+      label: `Você (${state.myUsername}) — Tela`,
       isLocal: true,
     });
   }
-  for (const [id, stream] of state.streams) {
-    desired.set(id, {
+  if (state.webcamStream) {
+    desired.set('local:webcam', {
+      stream: state.webcamStream,
+      label: `Você (${state.myUsername}) — Webcam`,
+      isLocal: true,
+    });
+  }
+  for (const [key, stream] of state.streams) {
+    const peerId = key.slice(0, key.lastIndexOf(':'));
+    const purpose = purposeOfKey(key);
+    const name = state.peerUsernames.get(peerId) || `Usuário ${peerId.slice(0, 5)}`;
+    desired.set(key, {
       stream,
-      label: state.peerUsernames.get(id) || `Usuário ${id.slice(0, 5)}`,
+      label: `${name} — ${PURPOSE_LABEL[purpose] || purpose}`,
       isLocal: false,
     });
   }

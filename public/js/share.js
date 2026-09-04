@@ -13,6 +13,24 @@ const confirmShareBtn = document.getElementById('confirmShareBtn');
 const resolutionGroup = document.getElementById('resolutionGroup');
 const framerateGroup = document.getElementById('framerateGroup');
 const bitrateGroup = document.getElementById('bitrateGroup');
+const webcamBtn = document.getElementById('startWebcamBtn');
+
+// Webcam has no quality panel — a facecam doesn't need screen-share-grade
+// resolution controls, so it always captures at this fixed target.
+// peers.js applies the matching fixed bitrate/framerate to the sender.
+const WEBCAM_CONSTRAINTS = {
+  video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+  audio: true,
+};
+
+// Guards startSharing/switchSource/startWebcam against a rapid double-click
+// firing a second concurrent getDisplayMedia/getUserMedia call before the
+// first has resolved — the native permission prompt doesn't block a second
+// JS call, so without this a double-click could orphan a MediaStream that
+// never gets stopped. Screen actions share one flag since starting and
+// switching can't overlap either.
+let screenCaptureInFlight = false;
+let webcamCaptureInFlight = false;
 
 // Wires a row of segmented buttons: clicking one marks it active and
 // updates the group's data-value, which the Start button reads later.
@@ -30,36 +48,61 @@ function initSegmented(group) {
   });
 }
 
-function setSharingUI(sharing) {
+function setScreenShareUI(sharing) {
   startBtn.textContent = sharing ? '⏹ Parar Compartilhamento' : '🖥️ Iniciar Compartilhamento';
   startBtn.classList.toggle('btn-danger', sharing);
   startBtn.classList.toggle('btn-primary', !sharing);
   switchBtn.classList.toggle('hidden', !sharing);
 }
 
+function setWebcamUI(sharing) {
+  webcamBtn.textContent = sharing ? '⏹ Parar Webcam' : '📷 Compartilhar Webcam';
+  webcamBtn.classList.toggle('btn-danger', sharing);
+  webcamBtn.classList.toggle('btn-ghost', !sharing);
+}
+
 function openPanel() { sharePanel.classList.remove('hidden'); }
 function closePanel() { sharePanel.classList.add('hidden'); }
 
-// Stops our outgoing tracks. Stopping the local tracks alone doesn't tell
-// any peer connection anything — announceSharingStatus(false) is what
-// actually makes everyone's tile disappear immediately (peers.js acts on
-// it directly), while removeOutgoingTracks() cleans up the WebRTC side
+// Stops our outgoing screen share. Stopping the local tracks alone doesn't
+// tell any peer connection anything — announceSharingStatus(false) is what
+// actually makes everyone's tile disappear immediately (peers.js acts on it
+// directly), while removeOutgoingTracks() cleans up the WebRTC side
 // (removes our senders and renegotiates) so restarting a share later
 // doesn't pile a new track on top of a stale one.
 // Safe to call even when not currently sharing (e.g. on room exit).
 export function stopSharing() {
-  const wasSharing = !!state.localStream;
-  if (state.localStream) {
-    state.localStream.getTracks().forEach((track) => track.stop());
+  const wasSharing = !!state.screenStream;
+  if (state.screenStream) {
+    state.screenStream.getTracks().forEach((track) => track.stop());
   }
-  state.isSharing = false;
-  state.localStream = null;
+  state.isSharingScreen = false;
+  state.screenStream = null;
   renderTiles();
-  setSharingUI(false);
+  setScreenShareUI(false);
   if (wasSharing) {
-    removeOutgoingTracks();
+    removeOutgoingTracks('screen');
     showToast('Compartilhamento de tela interrompido.');
-    announceSharingStatus(false);
+    announceSharingStatus('screen', false);
+    refreshParticipants();
+  }
+}
+
+// Same as stopSharing() but for the webcam stream. Safe to call even when
+// not currently sharing (e.g. on room exit).
+export function stopWebcam() {
+  const wasSharing = !!state.webcamStream;
+  if (state.webcamStream) {
+    state.webcamStream.getTracks().forEach((track) => track.stop());
+  }
+  state.isSharingWebcam = false;
+  state.webcamStream = null;
+  renderTiles();
+  setWebcamUI(false);
+  if (wasSharing) {
+    removeOutgoingTracks('webcam');
+    showToast('Webcam desligada.');
+    announceSharingStatus('webcam', false);
     refreshParticipants();
   }
 }
@@ -131,55 +174,94 @@ async function captureDisplay() {
   return stream;
 }
 
-function reportCaptureError(err) {
-  console.error('Failed to capture screen:', err);
-  // getDisplayMedia doesn't distinguish "user clicked Cancel" from "user
-  // denied permission" — both surface as NotAllowedError.
+function reportCaptureError(err, isWebcam = false) {
+  console.error(`Failed to capture ${isWebcam ? 'webcam' : 'screen'}:`, err);
+  // getDisplayMedia/getUserMedia don't distinguish "user clicked Cancel"
+  // from "user denied permission" — both surface as NotAllowedError.
   if (err.name === 'NotAllowedError') {
     showToast('Permissão negada ou compartilhamento cancelado.', 'error');
   } else if (err.name === 'NotSupportedError' || err.name === 'NotFoundError') {
-    showToast('Compartilhamento de tela não é suportado neste navegador/dispositivo.', 'error');
+    showToast(
+      isWebcam ? 'Nenhuma webcam encontrada ou não suportada.' : 'Compartilhamento de tela não é suportado neste navegador/dispositivo.',
+      'error'
+    );
   } else {
-    showToast(`Erro ao capturar a tela: ${err.name} — ${err.message}`, 'error');
+    showToast(`Erro ao capturar ${isWebcam ? 'a webcam' : 'a tela'}: ${err.name} — ${err.message}`, 'error');
   }
 }
 
 // HOST SIDE: capture screen and call everyone in the room
 async function startSharing() {
+  if (screenCaptureInFlight) return;
   if (!navigator.mediaDevices?.getDisplayMedia) {
     showToast('Compartilhamento de tela não é suportado neste navegador/dispositivo.', 'error');
     return;
   }
 
+  screenCaptureInFlight = true;
   try {
     const stream = await captureDisplay();
     if (!stream) return; // picker cancelled
 
-    state.localStream = stream;
-    state.isSharing = true;
+    state.screenStream = stream;
+    state.isSharingScreen = true;
     renderTiles();
     showToast('Você começou a compartilhar sua tela.');
-    setSharingUI(true);
-    announceSharingStatus(true);
+    setScreenShareUI(true);
+    announceSharingStatus('screen', true);
     refreshParticipants();
 
-    state.knownPeers.forEach(callPeer);
+    state.knownPeers.forEach((id) => callPeer(id, 'screen'));
   } catch (err) {
     reportCaptureError(err);
+  } finally {
+    screenCaptureInFlight = false;
+  }
+}
+
+// HOST SIDE: turn the webcam on and call everyone in the room. Independent
+// of screen sharing — either, both, or neither can be active.
+async function startWebcam() {
+  if (webcamCaptureInFlight) return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showToast('Câmera não é suportada neste navegador/dispositivo.', 'error');
+    return;
+  }
+
+  webcamCaptureInFlight = true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(WEBCAM_CONSTRAINTS);
+    // Device unplugged / permission revoked mid-call.
+    stream.getVideoTracks()[0].onended = () => stopWebcam();
+
+    state.webcamStream = stream;
+    state.isSharingWebcam = true;
+    renderTiles();
+    showToast('Webcam ligada.');
+    setWebcamUI(true);
+    announceSharingStatus('webcam', true);
+    refreshParticipants();
+
+    state.knownPeers.forEach((id) => callPeer(id, 'webcam'));
+  } catch (err) {
+    reportCaptureError(err, true);
+  } finally {
+    webcamCaptureInFlight = false;
   }
 }
 
 // HOST SIDE: pick a different screen/window and swap it in live — viewers
 // keep watching, the picture just changes (see replaceOutgoingStream).
 async function switchSource() {
-  if (!state.isSharing) return;
-  const previous = state.localStream;
+  if (!state.isSharingScreen || screenCaptureInFlight) return;
+  screenCaptureInFlight = true;
+  const previous = state.screenStream;
   try {
     const stream = await captureDisplay();
     if (!stream) return; // picker cancelled — current share untouched
 
-    await replaceOutgoingStream(stream);
-    state.localStream = stream;
+    await replaceOutgoingStream('screen', stream);
+    state.screenStream = stream;
     renderTiles(); // repoints the local preview
 
     previous.getVideoTracks().forEach((t) => { t.onended = null; });
@@ -189,6 +271,8 @@ async function switchSource() {
     // captureDisplay threw — the previous stream is still live and still
     // wired to every viewer, so there's nothing to roll back.
     reportCaptureError(err);
+  } finally {
+    screenCaptureInFlight = false;
   }
 }
 
@@ -200,21 +284,22 @@ export function initSharing() {
   // Bitrate/framerate can change on the fly: push them to active senders
   // immediately instead of waiting for the next share to pick them up.
   // (Framerate here only caps the outgoing encode — it can't raise the
-  // capture rate above what getDisplayMedia was started with.)
+  // capture rate above what getDisplayMedia was started with.) Screen only
+  // — webcam has no quality panel.
   bitrateGroup.addEventListener('click', (e) => {
     if (e.target.tagName !== 'BUTTON') return;
     state.videoBitrateKbps = Number(bitrateGroup.dataset.value) || null;
-    if (state.isSharing) updateEncodingParams();
+    if (state.isSharingScreen) updateEncodingParams('screen');
   });
 
   framerateGroup.addEventListener('click', (e) => {
     if (e.target.tagName !== 'BUTTON') return;
     state.videoFramerateFps = Number(framerateGroup.dataset.value) || null;
-    if (state.isSharing) updateEncodingParams();
+    if (state.isSharingScreen) updateEncodingParams('screen');
   });
 
   startBtn.addEventListener('click', () => {
-    if (state.isSharing) {
+    if (state.isSharingScreen) {
       stopSharing();
     } else if (sharePanel.classList.contains('hidden')) {
       openPanel();
@@ -224,6 +309,10 @@ export function initSharing() {
   });
 
   switchBtn.addEventListener('click', switchSource);
+
+  webcamBtn.addEventListener('click', () => {
+    if (state.isSharingWebcam) stopWebcam(); else startWebcam();
+  });
 
   confirmShareBtn.addEventListener('click', () => {
     closePanel();

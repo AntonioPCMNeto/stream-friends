@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { stopSharing } from './share.js';
+import { stopSharing, stopWebcam } from './share.js';
 import { closeAllPeerConnections } from './peers.js';
 import { refreshParticipants } from './participants.js';
 import { showToast } from './toast.js';
@@ -95,6 +95,7 @@ function enterRoom() {
 // clean up our old room membership and notify the peers we left.
 function leaveRoom() {
   stopSharing();
+  stopWebcam();
   closeAllPeerConnections();
 
   state.hasEntered = false;

@@ -9,7 +9,9 @@ const listEl = document.getElementById('participantsList');
 function openPanel() { panel.classList.remove('hidden'); }
 function closePanel() { panel.classList.add('hidden'); }
 
-function buildRow(name, isSharing, isMe) {
+const PURPOSE_BADGE = { screen: '🔴 Tela', webcam: '📷 Webcam' };
+
+function buildRow(name, purposes, isMe) {
   const row = document.createElement('div');
   row.className = 'participant-row';
 
@@ -18,12 +20,12 @@ function buildRow(name, isSharing, isMe) {
   nameEl.textContent = isMe ? `${name} (Você)` : name;
   row.appendChild(nameEl);
 
-  if (isSharing) {
+  purposes.forEach((purpose) => {
     const badge = document.createElement('span');
     badge.className = 'sharing-badge';
-    badge.textContent = '🔴 Compartilhando';
+    badge.textContent = PURPOSE_BADGE[purpose] || purpose;
     row.appendChild(badge);
-  }
+  });
 
   return row;
 }
@@ -34,12 +36,17 @@ export function refreshParticipants() {
   listEl.innerHTML = '';
 
   if (state.myUsername) {
-    listEl.appendChild(buildRow(state.myUsername, state.isSharing, true));
+    const myPurposes = [
+      ...(state.isSharingScreen ? ['screen'] : []),
+      ...(state.isSharingWebcam ? ['webcam'] : []),
+    ];
+    listEl.appendChild(buildRow(state.myUsername, myPurposes, true));
   }
 
   state.knownPeers.forEach((id) => {
     const name = state.peerUsernames.get(id) || 'Alguém';
-    listEl.appendChild(buildRow(name, state.sharingPeers.has(id), false));
+    const purposes = state.sharingPeers.get(id) || new Set();
+    listEl.appendChild(buildRow(name, Array.from(purposes), false));
   });
 
   countEl.textContent = state.knownPeers.size + (state.myUsername ? 1 : 0);

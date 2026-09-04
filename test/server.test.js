@@ -50,10 +50,11 @@ test('signal is relayed between peers in the same room', async () => {
   await wait(100);
 
   const signalReceived = new Promise((resolve) => bob.once('signal', resolve));
-  alice.emit('signal', { to: bob.id, data: { type: 'offer', sdp: 'real' } });
+  alice.emit('signal', { to: bob.id, purpose: 'screen', data: { type: 'offer', sdp: 'real' } });
 
-  const { from, data } = await signalReceived;
+  const { from, purpose, data } = await signalReceived;
   assert.strictEqual(from, alice.id);
+  assert.strictEqual(purpose, 'screen');
   assert.strictEqual(data.sdp, 'real');
 
   alice.close();
