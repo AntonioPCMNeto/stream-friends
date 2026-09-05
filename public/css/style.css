@@ -669,7 +669,19 @@ main {
   cursor: pointer;
 }
 .picker-audio-toggle input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
-.picker-audio-hint { font-size: 13px; color: var(--text-dim); font-style: italic; }
+.picker-audio-field { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); }
+.picker-audio-select {
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  max-width: 220px;
+}
+.picker-audio-select:focus { outline: none; border-color: var(--accent); }
+.picker-audio-hint { font-size: 13px; color: var(--text-dim); font-style: italic; max-width: 320px; }
 .picker-footer-btns { display: flex; gap: 10px; }
 
 /* Toasts */

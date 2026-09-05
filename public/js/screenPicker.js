@@ -1,14 +1,20 @@
 // Electron doesn't show a native "choose what to share" dialog — this module
 // is the themed replacement. share.js calls pickSource() before it invokes
-// getDisplayMedia(); the promise resolves to { sourceId, isScreen, withAudio }
-// or null if the user cancels. main.js's display-media handler then applies
-// the choice (see screen-picker:choose there).
+// getDisplayMedia(); the promise resolves to
+// { sourceId, isScreen, audioMode, deviceId } or null if the user cancels.
+// audioMode 'system' is applied via main.js's display-media handler (see
+// screen-picker:choose there); 'device' is a plain getUserMedia capture that
+// share.js merges into the outgoing stream itself.
 
 let overlay = null;
 let selectedButton = null;
 let selectedSourceId = null;
 let selectedIsScreen = false;
-let audioEnabled = true;
+// 'none' | 'system' (whole-system loopback, screen-only) | 'device' (a
+// specific input, e.g. a virtual audio cable — see populateAudioOptions).
+// Persisted across picker opens, same as the old audioEnabled checkbox was.
+let audioMode = 'none';
+let selectedDeviceId = null;
 let onKeyDown = null;
 
 // Set for the lifetime of one picker; called exactly once with the result.
@@ -71,7 +77,26 @@ function buildTabButton(text, onClick) {
   return btn;
 }
 
-function showPicker(sources) {
+// Labels are blank until the app has been granted mic permission at least
+// once — probe with a throwaway getUserMedia so the dropdown shows real
+// device names (e.g. "CABLE Output (VB-Audio Virtual Cable)") instead of
+// blank entries. Electron auto-grants this (main.js registers no
+// setPermissionRequestHandler), so it's silent beyond a one-time OS prompt.
+async function listAudioInputDevices() {
+  try {
+    let devices = await navigator.mediaDevices.enumerateDevices();
+    if (devices.some((d) => d.kind === 'audioinput' && !d.label)) {
+      const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+      probe.getTracks().forEach((t) => t.stop());
+      devices = await navigator.mediaDevices.enumerateDevices();
+    }
+    return devices.filter((d) => d.kind === 'audioinput');
+  } catch {
+    return [];
+  }
+}
+
+function showPicker(sources, audioDevices) {
   const screens = sources.filter((s) => s.isScreen);
   const windows = sources.filter((s) => !s.isScreen);
 
@@ -97,31 +122,56 @@ function showPicker(sources) {
   const footer = document.createElement('div');
   footer.className = 'picker-footer';
 
-  // Electron can only capture whole-system audio (no API isolates a single
-  // window/app's sound), so the toggle is only honest when sharing an
-  // entire screen — for a window it would silently leak every other app's
-  // audio despite the user picking just one window's video.
-  const audioToggle = document.createElement('label');
-  audioToggle.className = 'picker-audio-toggle';
-  const audioCheckbox = document.createElement('input');
-  audioCheckbox.type = 'checkbox';
-  audioCheckbox.checked = audioEnabled;
-  audioCheckbox.addEventListener('change', () => { audioEnabled = audioCheckbox.checked; });
-  const audioLabel = document.createElement('span');
-  audioLabel.textContent = 'Compartilhar áudio do sistema';
-  audioToggle.appendChild(audioCheckbox);
-  audioToggle.appendChild(audioLabel);
-  footer.appendChild(audioToggle);
+  // Electron's built-in loopback can only capture whole-system audio (no API
+  // isolates a single window/app's sound), so it's only offered when sharing
+  // an entire screen — for a window it would silently leak every other app's
+  // audio despite the user picking just one window's video. The device
+  // option is the workaround: route the game/app's output to a virtual audio
+  // cable (VB-Cable, VoiceMeeter, ...) and pick that cable's input here —
+  // it's a normal getUserMedia capture (share.js), so it works for a window
+  // pick too and carries only that routed audio.
+  const audioField = document.createElement('label');
+  audioField.className = 'picker-audio-field';
+  const audioFieldLabel = document.createElement('span');
+  audioFieldLabel.textContent = 'Áudio';
+  const audioSelect = document.createElement('select');
+  audioSelect.className = 'picker-audio-select';
+  audioField.appendChild(audioFieldLabel);
+  audioField.appendChild(audioSelect);
+  footer.appendChild(audioField);
 
   const audioHint = document.createElement('span');
   audioHint.className = 'picker-audio-hint';
-  audioHint.textContent = 'Áudio disponível apenas ao compartilhar a tela inteira.';
+  audioHint.textContent = 'Para isolar o áudio de um app/jogo específico, roteie a saída dele para um cabo de áudio virtual (ex.: VB-Cable) e selecione-o aqui.';
   footer.appendChild(audioHint);
 
-  function setAudioAvailable(available) {
-    audioToggle.classList.toggle('hidden', !available);
-    audioHint.classList.toggle('hidden', available);
+  function populateAudioOptions(systemAvailable) {
+    audioSelect.innerHTML = '';
+    audioSelect.appendChild(new Option('Nenhum', 'none'));
+    if (systemAvailable) audioSelect.appendChild(new Option('Áudio do sistema', 'system'));
+    audioDevices.forEach((d) => {
+      audioSelect.appendChild(new Option(d.label || `Entrada ${d.deviceId.slice(0, 6)}`, d.deviceId));
+    });
+
+    // Restore the previous choice if it's still valid for this tab; otherwise
+    // fall back to 'none' instead of silently keeping a stale pick (e.g.
+    // 'system' selected, then switching to the Janelas tab).
+    const validValues = Array.from(audioSelect.options).map((o) => o.value);
+    let restore = 'none';
+    if (audioMode === 'system' && systemAvailable) restore = 'system';
+    else if (audioMode === 'device' && validValues.includes(selectedDeviceId)) restore = selectedDeviceId;
+    audioSelect.value = restore;
+
+    if (restore === 'none') { audioMode = 'none'; selectedDeviceId = null; }
+    else if (restore === 'system') { audioMode = 'system'; selectedDeviceId = null; }
+    else { audioMode = 'device'; selectedDeviceId = restore; }
   }
+
+  audioSelect.addEventListener('change', () => {
+    if (audioSelect.value === 'none') { audioMode = 'none'; selectedDeviceId = null; }
+    else if (audioSelect.value === 'system') { audioMode = 'system'; selectedDeviceId = null; }
+    else { audioMode = 'device'; selectedDeviceId = audioSelect.value; }
+  });
 
   const footerBtns = document.createElement('div');
   footerBtns.className = 'picker-footer-btns';
@@ -139,12 +189,11 @@ function showPicker(sources) {
   confirmBtn.disabled = true;
   confirmBtn.addEventListener('click', () => {
     if (!selectedSourceId) return;
-    // Only ever request loopback audio for a screen share, regardless of
-    // toggle state — the toggle is hidden (but not reset) on the windows tab.
     finish({
       sourceId: selectedSourceId,
       isScreen: selectedIsScreen,
-      withAudio: selectedIsScreen && audioEnabled,
+      audioMode,
+      deviceId: selectedDeviceId,
     });
   });
 
@@ -165,13 +214,13 @@ function showPicker(sources) {
   const screenTab = buildTabButton(`Telas (${screens.length})`, () => {
     screenTab.classList.add('active');
     windowTab.classList.remove('active');
-    setAudioAvailable(true);
+    populateAudioOptions(true);
     renderGrid(screens);
   });
   const windowTab = buildTabButton(`Janelas (${windows.length})`, () => {
     windowTab.classList.add('active');
     screenTab.classList.remove('active');
-    setAudioAvailable(false);
+    populateAudioOptions(false);
     renderGrid(windows);
   });
   tabs.appendChild(screenTab);
@@ -179,11 +228,11 @@ function showPicker(sources) {
 
   if (screens.length) {
     screenTab.classList.add('active');
-    setAudioAvailable(true);
+    populateAudioOptions(true);
     renderGrid(screens);
   } else {
     windowTab.classList.add('active');
-    setAudioAvailable(false);
+    populateAudioOptions(false);
     renderGrid(windows);
   }
 
@@ -203,9 +252,12 @@ export async function pickSource() {
   if (!window.screenPicker) return null;
   if (resolvePick) finish(null); // abandon any picker already open
 
-  const sources = await window.screenPicker.listSources();
+  const [sources, audioDevices] = await Promise.all([
+    window.screenPicker.listSources(),
+    listAudioInputDevices(),
+  ]);
   return new Promise((resolve) => {
     resolvePick = resolve;
-    showPicker(sources);
+    showPicker(sources, audioDevices);
   });
 }

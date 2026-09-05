@@ -146,15 +146,19 @@ async function captureDisplay() {
   };
 
   let audioConstraint;
+  let devicePick = null;
   if (window.screenPicker) {
-    // Electron: run our themed picker first, then request audio only for a
-    // full-screen share. Electron can't capture a single window's audio, and
-    // asking for any audio on a window share aborts the whole getDisplayMedia
-    // call with "Invalid capture constraints".
+    // Electron: run our themed picker first, then request loopback audio
+    // only for a full-screen share. Electron can't capture a single window's
+    // audio via loopback, and asking for any audio on a window share aborts
+    // the whole getDisplayMedia call with "Invalid capture constraints". A
+    // 'device' pick sidesteps that entirely — it's a plain getUserMedia
+    // capture merged in below, so it works for a window share too.
     const pick = await pickSource();
     if (!pick) return null; // user cancelled — no toast, matches native behavior
-    await window.screenPicker.choose({ sourceId: pick.sourceId, withAudio: pick.withAudio });
-    audioConstraint = pick.withAudio ? audioProcessing : false;
+    await window.screenPicker.choose({ sourceId: pick.sourceId, withAudio: pick.audioMode === 'system' });
+    audioConstraint = pick.audioMode === 'system' ? audioProcessing : false;
+    if (pick.audioMode === 'device' && pick.deviceId) devicePick = pick.deviceId;
   } else {
     audioConstraint = audioProcessing;
   }
@@ -163,6 +167,24 @@ async function captureDisplay() {
     video: videoConstraints,
     audio: audioConstraint,
   });
+
+  // Isolated app/game audio via a virtual audio cable: a normal microphone
+  // capture of whatever input device the user routed the app's output to,
+  // merged into the same stream sent to peers.js. Failure here (device
+  // unplugged between picker and now) shouldn't abort a share that's
+  // otherwise ready — just carry on without that audio track.
+  if (devicePick) {
+    try {
+      const micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { exact: devicePick }, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+      const micTrack = micStream.getAudioTracks()[0];
+      if (micTrack) stream.addTrack(micTrack);
+    } catch (err) {
+      console.error('Failed to capture audio device:', err);
+      showToast('Não foi possível capturar o dispositivo de áudio selecionado.', 'error');
+    }
+  }
 
   // Tells the encoder to favor smooth frame delivery over per-frame
   // sharpness — the default ('detail') optimizes for static content and
