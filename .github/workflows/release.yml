@@ -1,0 +1,36 @@
+# Builds and publishes the Windows installer via electron-builder. Runs on a
+# clean GitHub-hosted Windows runner rather than a dev machine specifically
+# because electron-builder's NSIS target has to execute the freshly-built,
+# not-yet-signed installer once (a self-extraction step that produces the
+# uninstaller binary) before it ever gets signed — a dev machine with Smart
+# App Control enabled blocks that unsigned exe from running at all, and
+# there's no way to sign it earlier in the process to satisfy that.
+#
+# Trigger: push a tag matching v*.*.* (e.g. v0.0.6) that matches the version
+# in package.json, or run manually from the Actions tab.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - run: npm run dist -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
