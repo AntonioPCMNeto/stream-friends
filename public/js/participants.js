@@ -5,6 +5,8 @@ const toggleBtn = document.getElementById('participantsBtn');
 const countEl = document.getElementById('participantsCount');
 const panel = document.getElementById('participantsPanel');
 const listEl = document.getElementById('participantsList');
+const voiceSidebar = document.getElementById('voiceSidebar');
+const voiceSidebarList = document.getElementById('voiceSidebarList');
 
 function openPanel() { panel.classList.remove('hidden'); }
 function closePanel() { panel.classList.add('hidden'); }
@@ -42,22 +44,30 @@ function buildRow(name, purposes, isMe, inVoice) {
 // whenever room membership or anyone's sharing status changes.
 export function refreshParticipants() {
   listEl.innerHTML = '';
+  voiceSidebarList.innerHTML = '';
+
+  const myPurposes = [
+    ...(state.isSharingScreen ? ['screen'] : []),
+    ...(state.isSharingWebcam ? ['webcam'] : []),
+  ];
 
   if (state.myUsername) {
-    const myPurposes = [
-      ...(state.isSharingScreen ? ['screen'] : []),
-      ...(state.isSharingWebcam ? ['webcam'] : []),
-    ];
     listEl.appendChild(buildRow(state.myUsername, myPurposes, true, state.isInVoice));
+  }
+  if (state.isInVoice) {
+    voiceSidebarList.appendChild(buildRow(state.myUsername, myPurposes, true, false));
   }
 
   state.knownPeers.forEach((id) => {
     const name = state.peerUsernames.get(id) || 'Alguém';
-    const purposes = state.sharingPeers.get(id) || new Set();
-    listEl.appendChild(buildRow(name, Array.from(purposes), false, state.voicePeers.has(id)));
+    const purposes = Array.from(state.sharingPeers.get(id) || new Set());
+    const inVoice = state.voicePeers.has(id);
+    listEl.appendChild(buildRow(name, purposes, false, inVoice));
+    if (inVoice) voiceSidebarList.appendChild(buildRow(name, purposes, false, false));
   });
 
   countEl.textContent = state.knownPeers.size + (state.myUsername ? 1 : 0);
+  voiceSidebar.classList.toggle('hidden', !state.isInVoice);
 }
 
 export function initParticipants() {

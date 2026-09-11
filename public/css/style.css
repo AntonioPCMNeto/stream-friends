@@ -380,6 +380,31 @@ main {
   flex-shrink: 0;
 }
 
+/* Fixed, not part of the room-bar dropdowns — mirrors .chat-panel's pattern
+   so it stays visible on its own edge of the screen instead of competing
+   with .video-grid for horizontal space. */
+.voice-sidebar {
+  position: fixed;
+  left: 20px;
+  top: 110px;
+  z-index: 30;
+  width: 220px;
+  max-width: calc(100vw - 40px);
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+.voice-sidebar.hidden { display: none; }
+.voice-sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .share-panel {
   position: absolute;
   top: calc(100% + 10px);
