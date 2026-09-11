@@ -4,6 +4,7 @@ import { closeAllPeerConnections } from './peers.js';
 import { refreshParticipants } from './participants.js';
 import { showToast } from './toast.js';
 import { clearChat } from './chat.js';
+import { resetVoice } from './voice.js';
 
 const lobby = document.getElementById('lobby');
 const appScreen = document.getElementById('appScreen');
@@ -96,6 +97,7 @@ function enterRoom() {
 function leaveRoom() {
   stopSharing();
   stopWebcam();
+  resetVoice();
   closeAllPeerConnections();
 
   state.hasEntered = false;
@@ -105,6 +107,7 @@ function leaveRoom() {
   state.knownPeers.clear();
   state.peerUsernames.clear();
   state.sharingPeers.clear();
+  state.voicePeers.clear();
   refreshParticipants();
   clearChat();
 

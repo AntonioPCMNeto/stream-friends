@@ -178,6 +178,22 @@ main {
 
 .share-control, .participants-control { position: relative; }
 
+.voice-control { display: flex; align-items: center; gap: 8px; }
+/* Icon-only toggles — keep them tight next to the join/leave buttons. */
+#voiceMuteBtn, #voiceDeafenBtn { padding: 0 12px; font-size: 15px; }
+.voice-mic-select {
+  height: 38px;
+  max-width: 170px;
+  padding: 0 8px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.voice-mic-select:focus { outline: none; border-color: var(--accent); }
+
 /* Floating launcher (not in normal flow — see index.html), same corner the
    chat panel itself opens in; hidden while the panel is open so the two
    never overlap (see openPanel/closePanel in chat.js). */
@@ -333,11 +349,12 @@ main {
 .participant-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   font-size: 14px;
 }
 .participant-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -356,6 +373,11 @@ main {
 @keyframes pulse-live {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
+}
+.voice-badge {
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .share-panel {

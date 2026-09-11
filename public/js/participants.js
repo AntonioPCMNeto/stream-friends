@@ -11,7 +11,7 @@ function closePanel() { panel.classList.add('hidden'); }
 
 const PURPOSE_BADGE = { screen: '🔴 Tela', webcam: '📷 Webcam' };
 
-function buildRow(name, purposes, isMe) {
+function buildRow(name, purposes, isMe, inVoice) {
   const row = document.createElement('div');
   row.className = 'participant-row';
 
@@ -19,6 +19,14 @@ function buildRow(name, purposes, isMe) {
   nameEl.className = 'participant-name';
   nameEl.textContent = isMe ? `${name} (Você)` : name;
   row.appendChild(nameEl);
+
+  if (inVoice) {
+    const badge = document.createElement('span');
+    badge.className = 'voice-badge';
+    badge.textContent = '🎧';
+    badge.title = 'No áudio';
+    row.appendChild(badge);
+  }
 
   purposes.forEach((purpose) => {
     const badge = document.createElement('span');
@@ -40,13 +48,13 @@ export function refreshParticipants() {
       ...(state.isSharingScreen ? ['screen'] : []),
       ...(state.isSharingWebcam ? ['webcam'] : []),
     ];
-    listEl.appendChild(buildRow(state.myUsername, myPurposes, true));
+    listEl.appendChild(buildRow(state.myUsername, myPurposes, true, state.isInVoice));
   }
 
   state.knownPeers.forEach((id) => {
     const name = state.peerUsernames.get(id) || 'Alguém';
     const purposes = state.sharingPeers.get(id) || new Set();
-    listEl.appendChild(buildRow(name, Array.from(purposes), false));
+    listEl.appendChild(buildRow(name, Array.from(purposes), false, state.voicePeers.has(id)));
   });
 
   countEl.textContent = state.knownPeers.size + (state.myUsername ? 1 : 0);
