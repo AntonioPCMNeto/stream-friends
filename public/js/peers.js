@@ -583,6 +583,7 @@ export function initPeerSignaling(theSocket) {
   // app-level event, not guaranteed to arrive at all if something goes
   // wrong mid-renegotiation.
   socket.on('peer-share-status', ({ id, purpose, isSharing }) => {
+    if (!PURPOSES.includes(purpose)) return; // 'voice' is handled by voice.js
     const purposes = state.sharingPeers.get(id) || new Set();
     if (isSharing) {
       purposes.add(purpose);
@@ -603,6 +604,7 @@ export function initPeerSignaling(theSocket) {
   // — no renegotiation, and while hidden the encoder has nothing to do for
   // them.
   socket.on('watch-status', ({ from, purpose, watching }) => {
+    if (!PURPOSES.includes(purpose)) return;
     const key = connKey(from, purpose);
     if (watching) pausedViewers.delete(key);
     else pausedViewers.add(key);
@@ -616,6 +618,7 @@ export function initPeerSignaling(theSocket) {
   // Handle incoming offer/answer/ICE-candidate messages relayed by the
   // server, routed to the connection for the signaled purpose.
   socket.on('signal', async ({ from, purpose, data }) => {
+    if (!PURPOSES.includes(purpose)) return; // voice.js owns the 'voice' mesh
     const pc = getOrCreatePeerConnection(from, purpose);
 
     if (data.type === 'offer') {

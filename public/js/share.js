@@ -14,14 +14,18 @@ const resolutionGroup = document.getElementById('resolutionGroup');
 const framerateGroup = document.getElementById('framerateGroup');
 const bitrateGroup = document.getElementById('bitrateGroup');
 const webcamBtn = document.getElementById('startWebcamBtn');
+const switchCameraBtn = document.getElementById('switchCameraBtn');
 
 // Webcam has no quality panel — a facecam doesn't need screen-share-grade
 // resolution controls, so it always captures at this fixed target.
 // peers.js applies the matching fixed bitrate/framerate to the sender.
-const WEBCAM_CONSTRAINTS = {
-  video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-  audio: true,
-};
+// `facingMode` is `ideal` (not `exact`) so it's a no-op on a single-camera
+// desktop and a front/back selector on a phone.
+const WEBCAM_VIDEO = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } };
+
+function webcamVideoConstraints(facingMode) {
+  return { ...WEBCAM_VIDEO, facingMode: { ideal: facingMode } };
+}
 
 // Guards startSharing/switchSource/startWebcam against a rapid double-click
 // firing a second concurrent getDisplayMedia/getUserMedia call before the
@@ -59,6 +63,20 @@ function setWebcamUI(sharing) {
   webcamBtn.textContent = sharing ? '⏹ Parar Webcam' : '📷 Compartilhar Webcam';
   webcamBtn.classList.toggle('btn-danger', sharing);
   webcamBtn.classList.toggle('btn-ghost', !sharing);
+  if (!sharing) switchCameraBtn.classList.add('hidden');
+}
+
+// The "trocar câmera" button is only useful when there's more than one camera
+// to switch between — enumerate after the webcam is live (labels/kinds are
+// only reliable once capture permission has been granted) and show it then.
+async function refreshSwitchCameraButton() {
+  if (!state.isSharingWebcam) return switchCameraBtn.classList.add('hidden');
+  let count = 0;
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    count = devices.filter((d) => d.kind === 'videoinput').length;
+  } catch { /* enumerateDevices unavailable — leave the button hidden */ }
+  switchCameraBtn.classList.toggle('hidden', count < 2);
 }
 
 function openPanel() { sharePanel.classList.remove('hidden'); }
@@ -252,7 +270,10 @@ async function startWebcam() {
 
   webcamCaptureInFlight = true;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia(WEBCAM_CONSTRAINTS);
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: webcamVideoConstraints(state.webcamFacing),
+      audio: true,
+    });
     // Device unplugged / permission revoked mid-call.
     stream.getVideoTracks()[0].onended = () => stopWebcam();
 
@@ -263,6 +284,7 @@ async function startWebcam() {
     setWebcamUI(true);
     announceSharingStatus('webcam', true);
     refreshParticipants();
+    refreshSwitchCameraButton();
 
     state.knownPeers.forEach((id) => callPeer(id, 'webcam'));
   } catch (err) {
@@ -295,6 +317,53 @@ async function switchSource() {
     reportCaptureError(err);
   } finally {
     screenCaptureInFlight = false;
+  }
+}
+
+// HOST SIDE: flip between the front and back camera (or any two cameras) and
+// swap it into the live webcam share — viewers keep watching, the picture
+// just changes (replaceOutgoingStream). The existing audio track is carried
+// over untouched so the mic isn't re-prompted or glitched. iOS can't hold two
+// camera captures at once, so the old video track is stopped *before* the new
+// one is acquired — a brief freeze, but it works everywhere. If acquiring the
+// new camera then fails, the share can't recover (old track already stopped),
+// so it's torn down cleanly rather than left with a dead track.
+async function switchCamera() {
+  if (!state.isSharingWebcam || webcamCaptureInFlight) return;
+  webcamCaptureInFlight = true;
+
+  const previous = state.webcamStream;
+  const audioTrack = previous.getAudioTracks()[0] || null;
+  const nextFacing = state.webcamFacing === 'environment' ? 'user' : 'environment';
+  let newVideo = null;
+
+  try {
+    previous.getVideoTracks().forEach((t) => { t.onended = null; t.stop(); });
+
+    const captured = await navigator.mediaDevices.getUserMedia({
+      video: webcamVideoConstraints(nextFacing),
+      audio: false,
+    });
+    newVideo = captured.getVideoTracks()[0];
+    newVideo.onended = () => stopWebcam();
+
+    const newStream = new MediaStream();
+    newStream.addTrack(newVideo);
+    if (audioTrack) newStream.addTrack(audioTrack);
+
+    await replaceOutgoingStream('webcam', newStream);
+    state.webcamStream = newStream;
+    state.webcamFacing = nextFacing;
+    renderTiles();
+    showToast('Câmera trocada.');
+  } catch (err) {
+    console.error('Failed to switch camera:', err);
+    showToast('Não foi possível trocar de câmera.', 'error');
+    if (newVideo) newVideo.onended = null;
+    newVideo?.stop();
+    stopWebcam();
+  } finally {
+    webcamCaptureInFlight = false;
   }
 }
 
@@ -335,6 +404,8 @@ export function initSharing() {
   webcamBtn.addEventListener('click', () => {
     if (state.isSharingWebcam) stopWebcam(); else startWebcam();
   });
+
+  switchCameraBtn.addEventListener('click', switchCamera);
 
   confirmShareBtn.addEventListener('click', () => {
     closePanel();

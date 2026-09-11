@@ -55,6 +55,15 @@
           <button id="copyLinkBtn" class="btn btn-ghost">🔗 Copiar link</button>
 
           <button id="startWebcamBtn" class="btn btn-ghost">📷 Compartilhar Webcam</button>
+          <button id="switchCameraBtn" class="btn btn-ghost hidden">🔄 Trocar câmera</button>
+
+          <div class="voice-control">
+            <button id="voiceJoinBtn" class="btn btn-ghost">🎧 Entrar no áudio</button>
+            <select id="voiceMicSelect" class="voice-mic-select hidden" title="Microfone" aria-label="Microfone"></select>
+            <button id="voiceMuteBtn" class="btn btn-ghost hidden" aria-pressed="false" title="Silenciar microfone">🎤</button>
+            <button id="voiceDeafenBtn" class="btn btn-ghost hidden" aria-pressed="false" title="Ensurdecer">🎧</button>
+            <button id="voiceLeaveBtn" class="btn btn-ghost hidden">📞 Sair do áudio</button>
+          </div>
 
           <div class="share-control">
             <button id="startShareBtn" class="btn btn-primary">🖥️ Iniciar Compartilhamento</button>

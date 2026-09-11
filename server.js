@@ -24,7 +24,7 @@ const rooms = new Map();
 const MAX_ROOM_ID_LENGTH = 64;
 const MAX_USERNAME_LENGTH = 50;
 const MAX_CHAT_MESSAGE_LENGTH = 500;
-const PURPOSES = ['screen', 'webcam'];
+const PURPOSES = ['screen', 'webcam', 'voice'];
 
 function isValidRoomId(roomId) {
   return typeof roomId === 'string' && roomId.length > 0 && roomId.length <= MAX_ROOM_ID_LENGTH;
@@ -62,7 +62,7 @@ io.on('connection', (socket) => {
       Array.from(room, ([id, info]) => ({ id, username: info.username, sharing: info.sharing }))
     );
 
-    room.set(socket.id, { username, sharing: { screen: false, webcam: false } });
+    room.set(socket.id, { username, sharing: { screen: false, webcam: false, voice: false } });
 
     // Announce the new peer to everyone already in the room
     socket.to(roomId).emit('viewer-joined', { id: socket.id, username });

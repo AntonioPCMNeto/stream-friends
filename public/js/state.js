@@ -7,8 +7,16 @@ export const state = {
   webcamStream: null,
   isSharingScreen: false,
   isSharingWebcam: false,
+  webcamFacing: 'user', // 'user' | 'environment' — which camera to request (matters on phones)
   videoBitrateKbps: 10000, // null/0 = auto (browser default, no cap) — screen only
   videoFramerateFps: 30, // screen only; webcam uses a fixed default (see share.js)
+  // Voice chat (full mesh, purpose 'voice' — see voice.js). Independent of
+  // screen/webcam sharing.
+  micStream: null,
+  isInVoice: false,
+  isMuted: false,
+  isDeafened: false,
+  voicePeers: new Set(), // socket ids currently in the voice mesh
   roomId: null,
   myUsername: null,
   hasEntered: false,
