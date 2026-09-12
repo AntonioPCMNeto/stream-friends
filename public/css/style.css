@@ -108,7 +108,7 @@ main {
 
 /* App screen */
 .room-bar {
-  max-width: 1100px;
+  max-width: 1340px;
   margin: 16px auto 0;
   display: flex;
   align-items: center;
@@ -388,16 +388,21 @@ main {
   flex-shrink: 0;
 }
 
-/* Fixed, not part of the room-bar dropdowns — mirrors .chat-panel's pattern
-   so it stays visible on its own edge of the screen instead of competing
-   with .video-grid for horizontal space. */
+/* A layout column next to .video-grid, not a floating overlay — a fixed
+   position independent of the centered, variable-width video grid used to
+   let it drift on top of the first tile on anything narrower than ~1400px.
+   Stacks above the grid instead of beside it below the .room-content
+   breakpoint. */
+.room-content {
+  max-width: 1340px;
+  margin: 24px auto 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
 .voice-sidebar {
-  position: fixed;
-  left: 20px;
-  top: 110px;
-  z-index: 30;
   width: 220px;
-  max-width: calc(100vw - 40px);
+  flex-shrink: 0;
   max-height: calc(100vh - 140px);
   overflow-y: auto;
   background: var(--surface);
@@ -411,6 +416,10 @@ main {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+@media (max-width: 760px) {
+  .room-content { flex-direction: column; }
+  .voice-sidebar { width: 100%; max-height: none; }
 }
 
 .share-panel {
@@ -463,8 +472,8 @@ main {
 
 /* Video grid */
 .video-grid {
-  max-width: 1100px;
-  margin: 24px auto 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 18px;
