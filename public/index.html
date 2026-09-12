@@ -40,31 +40,40 @@
         </div>
 
         <div class="room-bar-right">
-          <div class="participants-control">
-            <button id="participantsBtn" class="btn btn-ghost">👥 <span id="participantsCount">0</span></button>
+          <div class="bar-group">
+            <button id="startWebcamBtn" class="btn btn-ghost btn-icon" title="Compartilhar Webcam" aria-label="Compartilhar Webcam">📷</button>
+            <button id="switchCameraBtn" class="btn btn-ghost btn-icon hidden" title="Trocar câmera" aria-label="Trocar câmera">🔄</button>
 
-            <div id="participantsPanel" class="participants-panel hidden">
-              <div class="field-label">Participantes</div>
-              <div id="participantsList" class="participants-list"></div>
+            <div class="voice-control">
+              <button id="voiceJoinBtn" class="btn btn-ghost btn-icon" title="Entrar no áudio" aria-label="Entrar no áudio">🎧</button>
+              <select id="voiceMicSelect" class="voice-mic-select hidden" title="Microfone" aria-label="Microfone"></select>
+              <button id="voiceMuteBtn" class="btn btn-ghost btn-icon hidden" aria-pressed="false" title="Silenciar microfone">🎤</button>
+              <button id="voiceDeafenBtn" class="btn btn-ghost btn-icon hidden" aria-pressed="false" title="Ensurdecer">🎧</button>
+              <button id="voiceLeaveBtn" class="btn btn-ghost btn-icon hidden" title="Sair do áudio" aria-label="Sair do áudio">📞</button>
             </div>
           </div>
 
-          <button id="copyLinkBtn" class="btn btn-ghost">🔗 Copiar link</button>
+          <span class="bar-divider"></span>
 
-          <button id="startWebcamBtn" class="btn btn-ghost">📷 Compartilhar Webcam</button>
-          <button id="switchCameraBtn" class="btn btn-ghost hidden">🔄 Trocar câmera</button>
+          <div class="bar-group">
+            <div class="participants-control">
+              <button id="participantsBtn" class="btn btn-ghost btn-icon" title="Participantes" aria-label="Participantes">👥 <span id="participantsCount">0</span></button>
 
-          <div class="voice-control">
-            <button id="voiceJoinBtn" class="btn btn-ghost">🎧 Entrar no áudio</button>
-            <select id="voiceMicSelect" class="voice-mic-select hidden" title="Microfone" aria-label="Microfone"></select>
-            <button id="voiceMuteBtn" class="btn btn-ghost hidden" aria-pressed="false" title="Silenciar microfone">🎤</button>
-            <button id="voiceDeafenBtn" class="btn btn-ghost hidden" aria-pressed="false" title="Ensurdecer">🎧</button>
-            <button id="voiceLeaveBtn" class="btn btn-ghost hidden">📞 Sair do áudio</button>
+              <div id="participantsPanel" class="participants-panel hidden">
+                <div class="field-label">Participantes</div>
+                <div id="participantsList" class="participants-list"></div>
+              </div>
+            </div>
+
+            <button id="copyLinkBtn" class="btn btn-ghost btn-icon" title="Copiar link" aria-label="Copiar link">🔗</button>
           </div>
 
-          <div class="share-control">
-            <button id="startShareBtn" class="btn btn-primary">🖥️ Iniciar Compartilhamento</button>
-            <button id="switchSourceBtn" class="btn btn-ghost hidden">🔄 Trocar tela</button>
+          <span class="bar-divider"></span>
+
+          <div class="bar-group">
+            <div class="share-control">
+              <button id="startShareBtn" class="btn btn-primary">🖥️ Iniciar Compartilhamento</button>
+              <button id="switchSourceBtn" class="btn btn-ghost btn-icon hidden" title="Trocar tela" aria-label="Trocar tela">🔄</button>
 
             <div id="sharePanel" class="share-panel hidden">
               <div class="control-group">
@@ -102,9 +111,10 @@
               </div>
               <button id="confirmShareBtn" class="btn btn-primary">🖥️ Compartilhar</button>
             </div>
-          </div>
+            </div>
 
-          <button id="leaveRoomBtn" class="btn btn-ghost">🚪 Sair da Sala</button>
+            <button id="leaveRoomBtn" class="btn btn-ghost btn-icon" title="Sair da Sala" aria-label="Sair da Sala">🚪</button>
+          </div>
         </div>
       </div>
 

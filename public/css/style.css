@@ -178,9 +178,16 @@ main {
 
 .share-control, .participants-control { position: relative; }
 
+/* Room-bar buttons are icon-only (tooltips carry the label) so the bar
+   doesn't grow every time a new control is added. min-width, not a fixed
+   width, so a button whose content briefly changes (copyLinkBtn's "✅
+   Copiado!") can still grow instead of clipping. */
+.btn-icon { min-width: 38px; padding: 0 10px; font-size: 16px; }
+
+.bar-group { display: flex; align-items: center; gap: 8px; }
+.bar-divider { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
+
 .voice-control { display: flex; align-items: center; gap: 8px; }
-/* Icon-only toggles — keep them tight next to the join/leave buttons. */
-#voiceMuteBtn, #voiceDeafenBtn { padding: 0 12px; font-size: 15px; }
 .voice-mic-select {
   height: 38px;
   max-width: 170px;
@@ -193,6 +200,7 @@ main {
   cursor: pointer;
 }
 .voice-mic-select:focus { outline: none; border-color: var(--accent); }
+.voice-mic-select.hidden { display: none; }
 
 /* Floating launcher (not in normal flow — see index.html), same corner the
    chat panel itself opens in; hidden while the panel is open so the two

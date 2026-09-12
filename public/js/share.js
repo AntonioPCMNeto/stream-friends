@@ -59,7 +59,9 @@ function setScreenShareUI(sharing) {
 }
 
 function setWebcamUI(sharing) {
-  webcamBtn.textContent = sharing ? '⏹ Parar Webcam' : '📷 Compartilhar Webcam';
+  webcamBtn.textContent = sharing ? '⏹' : '📷';
+  webcamBtn.title = sharing ? 'Parar Webcam' : 'Compartilhar Webcam';
+  webcamBtn.setAttribute('aria-label', webcamBtn.title);
   webcamBtn.classList.toggle('btn-danger', sharing);
   webcamBtn.classList.toggle('btn-ghost', !sharing);
   if (!sharing) switchCameraBtn.classList.add('hidden');
