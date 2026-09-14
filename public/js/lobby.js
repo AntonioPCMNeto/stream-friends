@@ -27,6 +27,7 @@ const prefilledRoom = new URL(window.location.href).searchParams.get('room');
 if (prefilledRoom) roomCodeInput.value = prefilledRoom;
 
 const USERNAME_STORAGE_KEY = 'scrimaAi.username';
+const ROOM_STORAGE_KEY = 'scrimaAi.currentRoom';
 
 // Wrapped defensively — localStorage can throw in private/locked-down contexts.
 function loadSavedUsername() {
@@ -42,6 +43,33 @@ function saveUsername(username) {
     localStorage.setItem(USERNAME_STORAGE_KEY, username);
   } catch {
     // Ignore — persistence is a nice-to-have, not required to enter the room.
+  }
+}
+
+// Discord-style membership: entering a room "sticks" until you explicitly
+// leave. loadSavedRoom() is what lets a plain revisit (or a browser restart)
+// drop you straight back into the last room instead of the lobby.
+function loadSavedRoom() {
+  try {
+    return localStorage.getItem(ROOM_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveCurrentRoom(roomId) {
+  try {
+    localStorage.setItem(ROOM_STORAGE_KEY, roomId);
+  } catch {
+    // Ignore — persistence is a nice-to-have, not required to enter the room.
+  }
+}
+
+function clearSavedRoom() {
+  try {
+    localStorage.removeItem(ROOM_STORAGE_KEY);
+  } catch {
+    // Ignore.
   }
 }
 
@@ -75,6 +103,7 @@ function enterRoom() {
   state.myUsername = username;
   state.hasEntered = true;
   saveUsername(username);
+  saveCurrentRoom(state.roomId);
 
   const url = new URL(window.location.href);
   url.searchParams.set('room', state.roomId);
@@ -99,6 +128,7 @@ function leaveRoom() {
   stopWebcam();
   resetVoice();
   closeAllPeerConnections();
+  clearSavedRoom();
 
   state.hasEntered = false;
   state.roomId = null;
@@ -123,6 +153,22 @@ function leaveRoom() {
 
   socket.disconnect();
   socket.connect();
+}
+
+// Discord-style "you're just in the server": a saved username plus a room
+// (either from a shared link's ?room= or the last room you were in) skips
+// the lobby screen entirely and rejoins directly. A link always wins over
+// the last room — clicking someone else's invite switches you into it, the
+// same as picking a different server, and that becomes the new "last room"
+// via enterRoom()'s own saveCurrentRoom() call.
+function attemptAutoJoin() {
+  const savedUsername = loadSavedUsername();
+  const targetRoom = prefilledRoom || loadSavedRoom();
+  if (!savedUsername || !targetRoom) return;
+
+  usernameInput.value = savedUsername;
+  roomCodeInput.value = targetRoom;
+  enterRoom();
 }
 
 // Wires the lobby form and the room-join handshake on (re)connect.
@@ -178,4 +224,6 @@ export function initLobby(theSocket) {
     connectionDot.title = 'Desconectado';
     if (state.hasEntered) showToast('Conexão perdida. Reconectando...', 'error');
   });
+
+  attemptAutoJoin();
 }
