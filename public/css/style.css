@@ -133,6 +133,55 @@ main {
   border-radius: 10px;
 }
 .auth-status.hidden { display: none; }
+
+/* Persistent "servers" list for signed-in accounts (see lobby.js/rooms.js)
+   — sits between the signed-in status row and the code-based join, which
+   stays the fallback for both guests and any code a signed-in user didn't
+   create themselves. */
+#myServersSection.hidden { display: none; }
+.my-servers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 160px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+.my-server-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  width: 100%;
+}
+.my-server-row:hover { border-color: var(--accent); }
+.my-server-row span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.no-servers-hint { font-size: 13px; color: var(--text-dim); margin: 0 0 12px; }
+.create-server-form { display: flex; gap: 8px; margin-bottom: 4px; }
+.create-server-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+.create-server-form input:focus { outline: none; border-color: var(--accent); }
 .auth-name {
   flex: 1;
   min-width: 0;

@@ -17,6 +17,12 @@ export function isConfigured() {
   return supabase !== null;
 }
 
+// Lets other modules (rooms.js) reuse this same client/session instead of
+// creating a second one.
+export function getClient() {
+  return supabase;
+}
+
 // The username chosen at signup (stored as user_metadata on the Supabase
 // user) is what should show up everywhere in the app — falls back to the
 // email's local part for an account created before this field existed.

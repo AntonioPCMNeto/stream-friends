@@ -6,6 +6,7 @@ import { showToast } from './toast.js';
 import { clearChat } from './chat.js';
 import { resetVoice } from './voice.js';
 import * as auth from './auth.js';
+import * as rooms from './rooms.js';
 import { buildAvatar } from './identity.js';
 
 const lobby = document.getElementById('lobby');
@@ -36,6 +37,11 @@ const authSignUpBtn = document.getElementById('authSignUpBtn');
 const authModeToggleBtn = document.getElementById('authModeToggleBtn');
 const authDivider = document.getElementById('authDivider');
 const guestFields = document.getElementById('guestFields');
+const myServersSection = document.getElementById('myServersSection');
+const myServersList = document.getElementById('myServersList');
+const createServerNameInput = document.getElementById('createServerNameInput');
+const createServerBtn = document.getElementById('createServerBtn');
+const createServerError = document.getElementById('createServerError');
 
 let socket = null;
 
@@ -155,6 +161,46 @@ function applyAuthMode() {
   authError.textContent = '';
 }
 
+// Persistent "servers" (see rooms.js) — signed-in only, since membership is
+// tied to an account. Clicking a listed server just drives the same
+// enterRoom() a typed code does; there's no separate entry path.
+//
+// Supabase's auth listener can fire more than once in quick succession
+// while a session is being resolved on load, so this can end up called
+// several times concurrently. A request token makes sure only the latest
+// call's response ever renders — an overtaken response is dropped instead
+// of appending onto a list an older call already started clearing/filling.
+let serversRequestId = 0;
+async function refreshMyServers() {
+  const requestId = ++serversRequestId;
+  const myRooms = await rooms.listMyRooms();
+  if (requestId !== serversRequestId) return;
+
+  myServersList.innerHTML = '';
+
+  if (myRooms.length === 0) {
+    const hint = document.createElement('p');
+    hint.className = 'no-servers-hint';
+    hint.textContent = 'Você ainda não tem servidores.';
+    myServersList.appendChild(hint);
+    return;
+  }
+
+  myRooms.forEach((room) => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'my-server-row';
+    const name = document.createElement('span');
+    name.textContent = room.name;
+    row.appendChild(name);
+    row.addEventListener('click', () => {
+      roomCodeInput.value = room.id;
+      enterRoom();
+    });
+    myServersList.appendChild(row);
+  });
+}
+
 // Signed in ⇒ identity is verified server-side and can't be spoofed, so the
 // free-text nick field gets out of the way entirely and the room-scoped
 // "who are you" question is already answered. Signed out ⇒ the guest form
@@ -162,6 +208,7 @@ function applyAuthMode() {
 function applyAuthUX() {
   const signedIn = Boolean(identity);
   authStatus.classList.toggle('hidden', !signedIn);
+  myServersSection.classList.toggle('hidden', !signedIn);
   authForm.classList.toggle('hidden', signedIn || !auth.isConfigured());
   authDivider.classList.toggle('hidden', signedIn || !auth.isConfigured());
   guestFields.classList.toggle('hidden', signedIn);
@@ -173,6 +220,7 @@ function applyAuthUX() {
     authAvatar.innerHTML = '';
     authAvatar.appendChild(buildAvatar(identity.username));
     usernameInput.value = identity.username || '';
+    refreshMyServers();
   } else {
     applyAuthMode();
     applyReturningUserUX();
@@ -186,12 +234,22 @@ function enterRoom() {
     return;
   }
 
-  state.roomId = roomCodeInput.value.trim() || crypto.randomUUID().slice(0, 8);
+  const typedRoomCode = roomCodeInput.value.trim();
+  state.roomId = typedRoomCode || crypto.randomUUID().slice(0, 8);
   state.myUsername = username;
   state.myVerified = Boolean(identity);
   state.hasEntered = true;
   saveUsername(username);
   saveCurrentRoom(state.roomId);
+
+  // Signed in + an actual typed/shared code (not the blank-code throwaway
+  // path) — try to register persistent membership. Most codes aren't real
+  // servers and this just silently no-ops; when one is, this is what makes
+  // "Meus Servidores" pick up someone else's invite link with no dedicated
+  // "join" UI needed.
+  if (identity && typedRoomCode) {
+    rooms.tryJoinByInvite(typedRoomCode);
+  }
 
   const url = new URL(window.location.href);
   url.searchParams.set('room', state.roomId);
@@ -238,7 +296,7 @@ function leaveRoom() {
   lobby.style.display = '';
   lobbyError.textContent = '';
   roomCodeInput.value = '';
-  applyReturningUserUX();
+  applyAuthUX(); // not applyReturningUserUX() directly — that ignores identity and would show the guest "welcome back" banner even when still signed in
 
   socket.disconnect();
   socket.connect();
@@ -307,6 +365,28 @@ export async function initLobby(theSocket) {
     await auth.signOut();
     identity = null;
     applyAuthUX();
+  });
+
+  createServerBtn.addEventListener('click', async () => {
+    if (createServerBtn.disabled) return; // guards a double-click into two real rooms
+    createServerError.textContent = '';
+    const name = createServerNameInput.value.trim();
+    if (!name) { createServerError.textContent = 'Dê um nome ao servidor.'; return; }
+
+    createServerBtn.disabled = true;
+    try {
+      const { room, error } = await rooms.createRoom(name);
+      if (error) { createServerError.textContent = error; return; }
+
+      createServerNameInput.value = '';
+      roomCodeInput.value = room.id;
+      enterRoom();
+    } finally {
+      createServerBtn.disabled = false;
+    }
+  });
+  createServerNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') createServerBtn.click();
   });
 
   copyLinkBtn.addEventListener('click', async () => {

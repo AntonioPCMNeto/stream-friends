@@ -22,6 +22,18 @@
         <button id="signOutBtn" class="btn btn-ghost btn-small">Sair</button>
       </div>
 
+      <div id="myServersSection" class="hidden">
+        <div class="field-label">Meus Servidores</div>
+        <div id="myServersList" class="my-servers-list"></div>
+
+        <div class="create-server-form">
+          <input id="createServerNameInput" type="text" placeholder="Nome do novo servidor" maxlength="40">
+          <button id="createServerBtn" class="btn btn-ghost btn-small">+ Criar</button>
+        </div>
+        <p id="createServerError" class="error"></p>
+        <p class="auth-divider">ou entre com um código</p>
+      </div>
+
       <div id="authForm" class="hidden">
         <label class="field">
           <span>E-mail</span>
