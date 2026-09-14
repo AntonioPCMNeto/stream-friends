@@ -75,6 +75,32 @@ test('join-room rejects an empty room id or username', async () => {
   socket.close();
 });
 
+test('joining with the same clientId evicts the previous connection instead of duplicating it', async () => {
+  const first = await connect();
+  const bystander = await connect();
+
+  first.emit('join-room', { roomId: 'room-d', username: 'Totonho', clientId: 'device-1' });
+  bystander.emit('join-room', { roomId: 'room-d', username: 'Bystander' });
+  await wait(100);
+  const firstId = first.id; // socket.io-client clears .id once 'disconnect' fires below
+
+  const firstDisconnected = new Promise((resolve) => first.once('disconnect', resolve));
+  const bystanderSawPeerLeft = new Promise((resolve) => bystander.once('peer-left', resolve));
+
+  const second = await connect();
+  const existingPeersReceived = new Promise((resolve) => second.once('existing-peers', resolve));
+  second.emit('join-room', { roomId: 'room-d', username: 'Totonho', clientId: 'device-1' });
+
+  const [, leftId, peers] = await Promise.all([firstDisconnected, bystanderSawPeerLeft, existingPeersReceived]);
+
+  assert.strictEqual(leftId, firstId, 'the stale connection for the same clientId must be evicted');
+  assert.strictEqual(peers.length, 1, 'only the bystander should remain, not a stale copy of Totonho');
+  assert.strictEqual(peers[0].username, 'Bystander');
+
+  bystander.close();
+  second.close();
+});
+
 test.after(() => {
   io.close();
   server.close();

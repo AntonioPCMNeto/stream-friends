@@ -23,6 +23,7 @@ const rooms = new Map();
 
 const MAX_ROOM_ID_LENGTH = 64;
 const MAX_USERNAME_LENGTH = 50;
+const MAX_CLIENT_ID_LENGTH = 100;
 const MAX_CHAT_MESSAGE_LENGTH = 500;
 const PURPOSES = ['screen', 'webcam', 'voice'];
 
@@ -32,6 +33,14 @@ function isValidRoomId(roomId) {
 
 function isValidUsername(username) {
   return typeof username === 'string' && username.trim().length > 0 && username.length <= MAX_USERNAME_LENGTH;
+}
+
+// Opaque per-browser id (see lobby.js) — not an account, just enough to tell
+// "the same browser rejoining" apart from "someone else picked the same
+// name". Optional: older/unpatched clients that don't send one simply don't
+// get deduped, same as before.
+function isValidClientId(clientId) {
+  return typeof clientId === 'string' && clientId.length > 0 && clientId.length <= MAX_CLIENT_ID_LENGTH;
 }
 
 function isValidChatMessage(text) {
@@ -45,8 +54,9 @@ function isValidPurpose(purpose) {
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  socket.on('join-room', ({ roomId, username }) => {
+  socket.on('join-room', ({ roomId, username, clientId }) => {
     if (!isValidRoomId(roomId) || !isValidUsername(username)) return;
+    const safeClientId = isValidClientId(clientId) ? clientId : null;
 
     socket.join(roomId);
     socket.data.roomId = roomId;
@@ -55,6 +65,21 @@ io.on('connection', (socket) => {
     if (!rooms.has(roomId)) rooms.set(roomId, new Map());
     const room = rooms.get(roomId);
 
+    // The same browser rejoining (a reload, a network blip, a second tab) —
+    // evict its previous entry instead of piling up ghost copies of
+    // yourself. Disconnecting the stale socket runs its own 'disconnect'
+    // cleanup and tells the rest of the room that id left; the explicit
+    // room.delete() here just makes sure the new join's own 'existing-peers'
+    // snapshot (built right below) doesn't include it too.
+    if (safeClientId) {
+      for (const [id, info] of room) {
+        if (info.clientId === safeClientId && id !== socket.id) {
+          io.sockets.sockets.get(id)?.disconnect(true);
+          room.delete(id);
+        }
+      }
+    }
+
     // Tell the newly joined peer who is already in the room, including
     // which purposes (screen/webcam) each of them is currently sharing.
     socket.emit(
@@ -62,7 +87,7 @@ io.on('connection', (socket) => {
       Array.from(room, ([id, info]) => ({ id, username: info.username, sharing: info.sharing }))
     );
 
-    room.set(socket.id, { username, sharing: { screen: false, webcam: false, voice: false } });
+    room.set(socket.id, { username, clientId: safeClientId, sharing: { screen: false, webcam: false, voice: false } });
 
     // Announce the new peer to everyone already in the room
     socket.to(roomId).emit('viewer-joined', { id: socket.id, username });

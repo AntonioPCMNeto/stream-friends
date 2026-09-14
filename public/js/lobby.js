@@ -73,6 +73,29 @@ function clearSavedRoom() {
   }
 }
 
+// Opaque per-browser id, not tied to the (freely-editable) username — lets
+// the server tell "this is the same browser rejoining" apart from "someone
+// else picked the same name", so a reload/reconnect replaces your old
+// entry in the room instead of sitting alongside it as a ghost duplicate.
+// Falls back to null (no dedup, same as before) if localStorage is
+// unavailable — never blocks joining the room over it.
+const CLIENT_ID_STORAGE_KEY = 'scrimaAi.clientId';
+
+function getOrCreateClientId() {
+  try {
+    let id = localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(CLIENT_ID_STORAGE_KEY, id);
+    }
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+const clientId = getOrCreateClientId();
+
 // A returning user only needs to type the room code — jump focus straight
 // there and let them know we remembered their name. A first-time visitor
 // still needs to pick a name first.
@@ -116,7 +139,7 @@ function enterRoom() {
   appScreen.style.display = '';
 
   if (socket.connected) {
-    socket.emit('join-room', { roomId: state.roomId, username: state.myUsername });
+    socket.emit('join-room', { roomId: state.roomId, username: state.myUsername, clientId });
   }
 }
 
@@ -212,7 +235,7 @@ export function initLobby(theSocket) {
       state.peerUsernames.clear();
       state.sharingPeers.clear();
       refreshParticipants();
-      socket.emit('join-room', { roomId: state.roomId, username: state.myUsername });
+      socket.emit('join-room', { roomId: state.roomId, username: state.myUsername, clientId });
       if (hasConnectedBefore) showToast('Reconectado à sala.');
     }
     hasConnectedBefore = true;
