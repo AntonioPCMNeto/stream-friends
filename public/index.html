@@ -14,12 +14,42 @@
 
   <main>
     <div id="lobby" class="card">
-      <h2>Entre em uma sala</h2>
+      <h2>Entre na sua conta</h2>
+
+      <div id="authStatus" class="auth-status hidden">
+        <span id="authAvatar" class="auth-avatar-wrap"></span>
+        <span id="authName" class="auth-name"></span>
+        <button id="signOutBtn" class="btn btn-ghost btn-small">Sair</button>
+      </div>
+
+      <div id="authForm" class="hidden">
+        <label class="field">
+          <span>E-mail</span>
+          <input id="authEmail" type="email" placeholder="voce@exemplo.com">
+        </label>
+        <label class="field hidden" id="authUsernameField">
+          <span>Nome de usuário</span>
+          <input id="authUsername" type="text" placeholder="ex.: João" maxlength="30">
+        </label>
+        <label class="field">
+          <span>Senha</span>
+          <input id="authPassword" type="password" placeholder="••••••••">
+        </label>
+        <p id="authError" class="error"></p>
+        <p id="authNotice" class="auth-notice hidden"></p>
+        <button id="authSignInBtn" class="btn btn-primary">Entrar</button>
+        <button id="authSignUpBtn" class="btn btn-primary hidden">Criar conta</button>
+        <button id="authModeToggleBtn" type="button" class="btn-link">Não tem conta? Criar uma</button>
+      </div>
+      <p id="authDivider" class="auth-divider hidden">ou continue como convidado</p>
+
       <p id="welcomeBack" class="welcome-back hidden"></p>
-      <label class="field">
-        <span>Seu Nick</span>
-        <input id="usernameInput" type="text" placeholder="ex.: João" maxlength="30">
-      </label>
+      <div id="guestFields">
+        <label class="field">
+          <span>Seu Nick</span>
+          <input id="usernameInput" type="text" placeholder="ex.: João" maxlength="30">
+        </label>
+      </div>
       <label class="field">
         <span>Código da Sala</span>
         <input id="roomCodeInput" type="text" placeholder="Deixe em branco para criar uma sala" maxlength="30">
@@ -158,6 +188,9 @@
 
   <!-- Socket.io client; js/main.js (ES module) does raw WebRTC signaling over it -->
   <script src="/socket.io/socket.io.js"></script>
+  <!-- Public Supabase config (see server.js) — must load before main.js,
+       whose module graph reads window.SUPABASE_URL/ANON_KEY at import time. -->
+  <script src="/config.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

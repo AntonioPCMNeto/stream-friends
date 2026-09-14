@@ -540,9 +540,10 @@ export function initPeerSignaling(theSocket) {
   // toasts) — this is a one-time dump of everyone already present, not
   // someone actively joining.
   socket.on('existing-peers', (peers) => {
-    peers.forEach(({ id, username, sharing }) => {
+    peers.forEach(({ id, username, sharing, verified }) => {
       state.knownPeers.add(id);
       state.peerUsernames.set(id, username);
+      state.peerVerified.set(id, Boolean(verified));
       const purposes = new Set(PURPOSES.filter((p) => sharing?.[p]));
       if (purposes.size > 0) state.sharingPeers.set(id, purposes);
     });
@@ -557,9 +558,10 @@ export function initPeerSignaling(theSocket) {
   // streams (screen/webcam) are currently active. Encoding params are the
   // same regardless of viewer count, so callPeer configuring the new
   // sender is all that's needed.
-  socket.on('viewer-joined', ({ id, username }) => {
+  socket.on('viewer-joined', ({ id, username, verified }) => {
     state.knownPeers.add(id);
     state.peerUsernames.set(id, username);
+    state.peerVerified.set(id, Boolean(verified));
     if (state.isSharingScreen) callPeer(id, 'screen');
     if (state.isSharingWebcam) callPeer(id, 'webcam');
     showToast(`${username} entrou na sala`);
@@ -570,6 +572,7 @@ export function initPeerSignaling(theSocket) {
     const username = state.peerUsernames.get(peerId) || 'Alguém';
     state.knownPeers.delete(peerId);
     state.peerUsernames.delete(peerId);
+    state.peerVerified.delete(peerId);
     state.sharingPeers.delete(peerId);
     closeConnectionsForPeer(peerId);
     showToast(`${username} saiu da sala`);

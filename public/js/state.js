@@ -19,10 +19,12 @@ export const state = {
   voicePeers: new Set(), // socket ids currently in the voice mesh
   roomId: null,
   myUsername: null,
+  myVerified: false, // signed in with Discord (see lobby.js/auth.js), not just a typed nick
   hasEntered: false,
   currentRoomUrl: null,
   knownPeers: new Set(), // remote socket ids
   peerUsernames: new Map(), // socket id -> username
+  peerVerified: new Map(), // socket id -> verified (bool, signed in with Discord)
   sharingPeers: new Map(), // socket id -> Set of purposes ('screen'/'webcam') they're sharing
   // tile key (`${peerId}:${purpose}`, 'local' streams excluded — see
   // state.screenStream/webcamStream) -> inbound MediaStream

@@ -14,7 +14,7 @@ function closePanel() { panel.classList.add('hidden'); }
 
 const PURPOSE_BADGE = { screen: '🔴 Tela', webcam: '📷 Webcam' };
 
-function buildRow(name, purposes, isMe, inVoice, peerId) {
+function buildRow(name, purposes, isMe, inVoice, peerId, verified) {
   const row = document.createElement('div');
   row.className = 'participant-row';
   row.dataset.peerId = peerId;
@@ -25,6 +25,14 @@ function buildRow(name, purposes, isMe, inVoice, peerId) {
   nameEl.className = 'participant-name';
   nameEl.textContent = isMe ? `${name} (Você)` : name;
   row.appendChild(nameEl);
+
+  if (verified) {
+    const badge = document.createElement('span');
+    badge.className = 'verified-badge';
+    badge.textContent = '✓';
+    badge.title = 'Conta verificada (Discord)';
+    row.appendChild(badge);
+  }
 
   if (inVoice) {
     const badge = document.createElement('span');
@@ -56,18 +64,19 @@ export function refreshParticipants() {
   ];
 
   if (state.myUsername) {
-    listEl.appendChild(buildRow(state.myUsername, myPurposes, true, state.isInVoice, 'local'));
+    listEl.appendChild(buildRow(state.myUsername, myPurposes, true, state.isInVoice, 'local', state.myVerified));
   }
   if (state.isInVoice) {
-    voiceSidebarList.appendChild(buildRow(state.myUsername, myPurposes, true, false, 'local'));
+    voiceSidebarList.appendChild(buildRow(state.myUsername, myPurposes, true, false, 'local', state.myVerified));
   }
 
   state.knownPeers.forEach((id) => {
     const name = state.peerUsernames.get(id) || 'Alguém';
     const purposes = Array.from(state.sharingPeers.get(id) || new Set());
     const inVoice = state.voicePeers.has(id);
-    listEl.appendChild(buildRow(name, purposes, false, inVoice, id));
-    if (inVoice) voiceSidebarList.appendChild(buildRow(name, purposes, false, false, id));
+    const verified = state.peerVerified.get(id);
+    listEl.appendChild(buildRow(name, purposes, false, inVoice, id, verified));
+    if (inVoice) voiceSidebarList.appendChild(buildRow(name, purposes, false, false, id, verified));
   });
 
   countEl.textContent = state.knownPeers.size + (state.myUsername ? 1 : 0);

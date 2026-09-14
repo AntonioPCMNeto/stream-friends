@@ -2,6 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 process.env.PORT = '3999';
+// Hermetic regardless of a local .env — these tests must never depend on
+// real network calls to Supabase (slow, flaky, and requires credentials
+// that won't exist in CI). Set (not deleted) *before* requiring server.js:
+// dotenv.config() only fills in vars that are still undefined, so a
+// same-process .env load can't override these back to real values.
+process.env.SUPABASE_URL = '';
+process.env.SUPABASE_ANON_KEY = '';
 const { server, io } = require('../server');
 const { io: ioc } = require('socket.io-client');
 
@@ -98,6 +105,24 @@ test('joining with the same clientId evicts the previous connection instead of d
   assert.strictEqual(peers[0].username, 'Bystander');
 
   bystander.close();
+  second.close();
+});
+
+test('join-room with a bogus access token still succeeds as an unverified guest', async () => {
+  const first = await connect();
+  first.emit('join-room', { roomId: 'room-e', username: 'Guest', accessToken: 'not-a-real-token' });
+  await wait(100);
+
+  const second = await connect();
+  const existingPeersReceived = new Promise((resolve) => second.once('existing-peers', resolve));
+  second.emit('join-room', { roomId: 'room-e', username: 'Bystander' });
+  const peers = await existingPeersReceived;
+
+  assert.strictEqual(peers.length, 1, 'the bogus-token join must still have succeeded, not been dropped');
+  assert.strictEqual(peers[0].username, 'Guest', 'an unverifiable token must not override the typed username');
+  assert.strictEqual(peers[0].verified, false, 'an unverifiable token must not be trusted as an account');
+
+  first.close();
   second.close();
 });
 

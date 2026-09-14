@@ -89,6 +89,64 @@ main {
 }
 .welcome-back.hidden { display: none; }
 
+/* Optional email/password sign-in (see lobby.js/auth.js) — a small form
+   above the guest fields, or a signed-in status row in its place. One
+   action shows at a time (sign in OR sign up, toggled by authModeToggleBtn)
+   rather than two competing forms. */
+#authForm.hidden { display: none; }
+#authForm .btn { width: 100%; }
+#authUsernameField.hidden { display: none; }
+.btn-link {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  background: none;
+  border: none;
+  color: var(--accent-hover);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+}
+.btn-link:hover { text-decoration: underline; }
+.auth-notice {
+  color: #4ade80;
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+.auth-notice.hidden { display: none; }
+
+.auth-divider {
+  margin: 12px 0 20px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+.auth-divider.hidden { display: none; }
+
+.auth-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+.auth-status.hidden { display: none; }
+.auth-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.btn-small { height: 28px; padding: 0 10px; font-size: 12px; }
+
+#guestFields.hidden { display: none; }
+
 .field { display: block; margin-bottom: 16px; text-align: left; }
 .field span { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
 .field input {
@@ -410,6 +468,15 @@ main {
 .voice-badge {
   font-size: 12px;
   line-height: 1;
+  flex-shrink: 0;
+}
+.verified-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #5865f2;
+  background: rgba(88, 101, 242, 0.14);
+  padding: 2px 6px;
+  border-radius: 999px;
   flex-shrink: 0;
 }
 

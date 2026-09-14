@@ -1,9 +1,31 @@
+require('dotenv').config();
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const server = http.createServer(app);
+
+// Optional — only set once SUPABASE_URL/SUPABASE_ANON_KEY are configured
+// (see .env.example). Absent them, join-room's accessToken verification is
+// simply skipped and every join is treated as an unverified guest, same as
+// before accounts existed.
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+// Frontend has no build step, so it can't read process.env — this hands it
+// the two (public, safe-to-expose) values it needs to talk to Supabase
+// directly. Served as JS rather than JSON so a plain <script src> can pull
+// it in before main.js runs.
+app.get('/config.js', (req, res) => {
+  res.type('application/javascript').send(
+    `window.SUPABASE_URL = ${JSON.stringify(SUPABASE_URL || '')};\n` +
+    `window.SUPABASE_ANON_KEY = ${JSON.stringify(SUPABASE_ANON_KEY || '')};\n`
+  );
+});
 
 // The web app talks to this server same-origin, so CORS never applies to
 // it — this only matters for the companion Electron desktop client, which
@@ -18,12 +40,13 @@ const io = new Server(server, {
 // Serve static frontend files
 app.use(express.static('public'));
 
-// roomId -> Map<socket.id, { username, sharing }>
+// roomId -> Map<socket.id, { username, clientId, userId, verified, sharing }>
 const rooms = new Map();
 
 const MAX_ROOM_ID_LENGTH = 64;
 const MAX_USERNAME_LENGTH = 50;
 const MAX_CLIENT_ID_LENGTH = 100;
+const MAX_ACCESS_TOKEN_LENGTH = 4096;
 const MAX_CHAT_MESSAGE_LENGTH = 500;
 const PURPOSES = ['screen', 'webcam', 'voice'];
 
@@ -43,6 +66,30 @@ function isValidClientId(clientId) {
   return typeof clientId === 'string' && clientId.length > 0 && clientId.length <= MAX_CLIENT_ID_LENGTH;
 }
 
+function isValidAccessToken(accessToken) {
+  return typeof accessToken === 'string' && accessToken.length > 0 && accessToken.length <= MAX_ACCESS_TOKEN_LENGTH;
+}
+
+// Verifies a Supabase access token against Supabase's own auth server —
+// simpler and safer than reimplementing JWT signature/expiry checks here.
+// Never throws: a bad/expired token or a network hiccup just means "not
+// verified", not a rejected join.
+async function verifyAccount(accessToken) {
+  if (!supabase || !isValidAccessToken(accessToken)) return null;
+  try {
+    const { data, error } = await supabase.auth.getUser(accessToken);
+    if (error || !data?.user) return null;
+    const meta = data.user.user_metadata || {};
+    return {
+      userId: data.user.id,
+      username: meta.username || data.user.email?.split('@')[0],
+    };
+  } catch (err) {
+    console.error('Failed to verify Supabase access token:', err);
+    return null;
+  }
+}
+
 function isValidChatMessage(text) {
   return typeof text === 'string' && text.trim().length > 0 && text.length <= MAX_CHAT_MESSAGE_LENGTH;
 }
@@ -54,29 +101,40 @@ function isValidPurpose(purpose) {
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  socket.on('join-room', ({ roomId, username, clientId }) => {
+  socket.on('join-room', async ({ roomId, username, clientId, accessToken }) => {
     if (!isValidRoomId(roomId) || !isValidUsername(username)) return;
     const safeClientId = isValidClientId(clientId) ? clientId : null;
 
+    // A verified account overrides the free-typed username with the
+    // Discord identity itself — that's the whole point, it can't be
+    // spoofed. Not signed in (or verification failed) just means "guest",
+    // never a rejected join.
+    const account = await verifyAccount(accessToken);
+    const userId = account?.userId ?? null;
+    const finalUsername = account?.username || username;
+
     socket.join(roomId);
     socket.data.roomId = roomId;
-    socket.data.username = username;
+    socket.data.username = finalUsername;
 
     if (!rooms.has(roomId)) rooms.set(roomId, new Map());
     const room = rooms.get(roomId);
 
-    // The same browser rejoining (a reload, a network blip, a second tab) —
-    // evict its previous entry instead of piling up ghost copies of
-    // yourself. Disconnecting the stale socket runs its own 'disconnect'
-    // cleanup and tells the rest of the room that id left; the explicit
-    // room.delete() here just makes sure the new join's own 'existing-peers'
-    // snapshot (built right below) doesn't include it too.
-    if (safeClientId) {
-      for (const [id, info] of room) {
-        if (info.clientId === safeClientId && id !== socket.id) {
-          io.sockets.sockets.get(id)?.disconnect(true);
-          room.delete(id);
-        }
+    // The same identity rejoining — evict its previous entry instead of
+    // piling up ghost copies of yourself. A verified userId wins when
+    // present (it survives a different browser/device); otherwise fall
+    // back to the per-browser clientId, same as before accounts existed.
+    // Disconnecting the stale socket runs its own 'disconnect' cleanup and
+    // tells the rest of the room that id left; the explicit room.delete()
+    // here just makes sure this join's own 'existing-peers' snapshot
+    // (built right below) doesn't include it too.
+    for (const [id, info] of room) {
+      if (id === socket.id) continue;
+      const sameAccount = userId && info.userId === userId;
+      const sameBrowser = safeClientId && info.clientId === safeClientId;
+      if (sameAccount || sameBrowser) {
+        io.sockets.sockets.get(id)?.disconnect(true);
+        room.delete(id);
       }
     }
 
@@ -84,13 +142,19 @@ io.on('connection', (socket) => {
     // which purposes (screen/webcam) each of them is currently sharing.
     socket.emit(
       'existing-peers',
-      Array.from(room, ([id, info]) => ({ id, username: info.username, sharing: info.sharing }))
+      Array.from(room, ([id, info]) => ({ id, username: info.username, sharing: info.sharing, verified: info.verified }))
     );
 
-    room.set(socket.id, { username, clientId: safeClientId, sharing: { screen: false, webcam: false, voice: false } });
+    room.set(socket.id, {
+      username: finalUsername,
+      clientId: safeClientId,
+      userId,
+      verified: Boolean(account),
+      sharing: { screen: false, webcam: false, voice: false },
+    });
 
     // Announce the new peer to everyone already in the room
-    socket.to(roomId).emit('viewer-joined', { id: socket.id, username });
+    socket.to(roomId).emit('viewer-joined', { id: socket.id, username: finalUsername, verified: Boolean(account) });
   });
 
   // Relay WebRTC offer/answer/ICE-candidate messages between two specific
