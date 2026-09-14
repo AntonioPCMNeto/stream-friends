@@ -1,4 +1,5 @@
 import { state } from './state.js';
+import { buildAvatar } from './identity.js';
 
 const control = document.querySelector('.participants-control');
 const toggleBtn = document.getElementById('participantsBtn');
@@ -13,9 +14,12 @@ function closePanel() { panel.classList.add('hidden'); }
 
 const PURPOSE_BADGE = { screen: '🔴 Tela', webcam: '📷 Webcam' };
 
-function buildRow(name, purposes, isMe, inVoice) {
+function buildRow(name, purposes, isMe, inVoice, peerId) {
   const row = document.createElement('div');
   row.className = 'participant-row';
+  row.dataset.peerId = peerId;
+
+  row.appendChild(buildAvatar(name));
 
   const nameEl = document.createElement('span');
   nameEl.className = 'participant-name';
@@ -52,22 +56,32 @@ export function refreshParticipants() {
   ];
 
   if (state.myUsername) {
-    listEl.appendChild(buildRow(state.myUsername, myPurposes, true, state.isInVoice));
+    listEl.appendChild(buildRow(state.myUsername, myPurposes, true, state.isInVoice, 'local'));
   }
   if (state.isInVoice) {
-    voiceSidebarList.appendChild(buildRow(state.myUsername, myPurposes, true, false));
+    voiceSidebarList.appendChild(buildRow(state.myUsername, myPurposes, true, false, 'local'));
   }
 
   state.knownPeers.forEach((id) => {
     const name = state.peerUsernames.get(id) || 'Alguém';
     const purposes = Array.from(state.sharingPeers.get(id) || new Set());
     const inVoice = state.voicePeers.has(id);
-    listEl.appendChild(buildRow(name, purposes, false, inVoice));
-    if (inVoice) voiceSidebarList.appendChild(buildRow(name, purposes, false, false));
+    listEl.appendChild(buildRow(name, purposes, false, inVoice, id));
+    if (inVoice) voiceSidebarList.appendChild(buildRow(name, purposes, false, false, id));
   });
 
   countEl.textContent = state.knownPeers.size + (state.myUsername ? 1 : 0);
   voiceSidebar.classList.toggle('hidden', !state.isInVoice);
+}
+
+// Toggles the speaking ring on a peer's avatar wherever it's currently
+// rendered (participants panel and/or voice sidebar). Called on every
+// analyser volume sample from voice.js — targeted class toggle, not a
+// re-render, so it doesn't fight the DOM churn every 150ms.
+export function setSpeaking(peerId, isSpeaking) {
+  document.querySelectorAll(`.participant-row[data-peer-id="${peerId}"] .avatar`).forEach((el) => {
+    el.classList.toggle('speaking', isSpeaking);
+  });
 }
 
 export function initParticipants() {

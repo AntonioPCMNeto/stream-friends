@@ -1,3 +1,5 @@
+import { buildAvatar, colorForName } from './identity.js';
+
 const MAX_MESSAGE_LENGTH = 500;
 
 const toggleBtn = document.getElementById('chatToggleBtn');
@@ -46,7 +48,21 @@ function appendMessage(username, text, ts, isOwn) {
 
   const meta = document.createElement('div');
   meta.className = 'chat-message-meta';
-  meta.textContent = `${username} · ${formatTime(ts)}`;
+
+  const avatar = buildAvatar(username);
+  avatar.classList.add('avatar-sm');
+  meta.appendChild(avatar);
+
+  const authorEl = document.createElement('span');
+  authorEl.className = 'chat-message-author';
+  authorEl.style.color = colorForName(username);
+  authorEl.textContent = username;
+  meta.appendChild(authorEl);
+
+  const timeEl = document.createElement('span');
+  timeEl.textContent = formatTime(ts);
+  meta.appendChild(timeEl);
+
   row.appendChild(meta);
 
   const body = document.createElement('div');

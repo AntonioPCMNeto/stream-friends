@@ -1,7 +1,7 @@
 import { iceServers } from './iceServers.js';
 import { state } from './state.js';
 import { showToast } from './toast.js';
-import { refreshParticipants } from './participants.js';
+import { refreshParticipants, setSpeaking } from './participants.js';
 
 // Voice chat is a full mesh, unlike screen/webcam (one sender -> many
 // viewers): every participant in voice holds one audio-only
@@ -16,6 +16,67 @@ import { refreshParticipants } from './participants.js';
 let socket = null;
 const voicePcs = new Map();   // peerId -> RTCPeerConnection
 const audioSinks = new Map(); // peerId -> detached autoplay <audio>
+
+// Speaking indicator: one AnalyserNode per live audio stream ('local' plus
+// one per remote peer), polled on a shared interval. A disabled track (muted
+// mic) outputs silence to every consumer including this analyser, so mute
+// suppresses the indicator for free — no extra check needed.
+const SPEAKING_THRESHOLD = 0.02; // RMS of time-domain samples, tuned by ear
+const SPEAKING_POLL_MS = 150;
+let audioCtx = null;
+const analysers = new Map(); // id -> { source, analyser, data, speaking }
+let monitorHandle = null;
+
+function ensureAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx.resume().catch(() => {});
+  return audioCtx;
+}
+
+function startMonitorLoop() {
+  if (monitorHandle) return;
+  monitorHandle = setInterval(() => {
+    analysers.forEach((entry, id) => {
+      entry.analyser.getByteTimeDomainData(entry.data);
+      let sumSquares = 0;
+      for (let i = 0; i < entry.data.length; i++) {
+        const v = (entry.data[i] - 128) / 128;
+        sumSquares += v * v;
+      }
+      const isSpeaking = Math.sqrt(sumSquares / entry.data.length) > SPEAKING_THRESHOLD;
+      if (isSpeaking !== entry.speaking) {
+        entry.speaking = isSpeaking;
+        setSpeaking(id, isSpeaking);
+      }
+    });
+  }, SPEAKING_POLL_MS);
+}
+
+function stopMonitorLoop() {
+  clearInterval(monitorHandle);
+  monitorHandle = null;
+}
+
+function attachAnalyser(id, stream) {
+  if (!stream || !stream.getAudioTracks().length || analysers.has(id)) return;
+  const ctx = ensureAudioCtx();
+  const source = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 512;
+  analyser.smoothingTimeConstant = 0.6;
+  source.connect(analyser);
+  analysers.set(id, { source, analyser, data: new Uint8Array(analyser.frequencyBinCount), speaking: false });
+  startMonitorLoop();
+}
+
+function detachAnalyser(id) {
+  const entry = analysers.get(id);
+  if (!entry) return;
+  entry.source.disconnect();
+  analysers.delete(id);
+  if (entry.speaking) setSpeaking(id, false);
+  if (analysers.size === 0) stopMonitorLoop();
+}
 
 const joinBtn = document.getElementById('voiceJoinBtn');
 const micSelect = document.getElementById('voiceMicSelect');
@@ -93,6 +154,7 @@ function createVoicePc(peerId) {
     audio.srcObject = event.streams[0] || new MediaStream([event.track]);
     audio.muted = state.isDeafened;
     audio.play().catch(() => {});
+    attachAnalyser(peerId, audio.srcObject);
   };
 
   voicePcs.set(peerId, pc);
@@ -127,6 +189,7 @@ function teardownPeer(peerId) {
   if (pc) { pc.close(); voicePcs.delete(peerId); }
   const audio = audioSinks.get(peerId);
   if (audio) { audio.srcObject = null; audioSinks.delete(peerId); }
+  detachAnalyser(peerId);
 }
 
 function teardownAllPeers() {
@@ -134,6 +197,10 @@ function teardownAllPeers() {
   voicePcs.clear();
   audioSinks.forEach((audio) => { audio.srcObject = null; });
   audioSinks.clear();
+  // Leaves the local analyser ('local') alone — a disconnect tears down the
+  // remote mesh but not the still-live mic capture, and existing-peers
+  // rebuilds the remote side on reconnect.
+  [...analysers.keys()].forEach((id) => { if (id !== 'local') detachAnalyser(id); });
 }
 
 function captureMic(deviceId) {
@@ -177,6 +244,8 @@ async function switchMicDevice(deviceId) {
 
     state.micStream = stream;
     currentMicDeviceId = deviceId;
+    detachAnalyser('local');
+    attachAnalyser('local', stream);
     voicePcs.forEach((pc) => {
       const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
       sender?.replaceTrack(track);
@@ -218,6 +287,7 @@ async function joinVoice() {
   state.isMuted = false;
   state.isDeafened = false;
   applyMicEnabled();
+  attachAnalyser('local', stream);
   await populateMicSelect();
   setVoiceUI();
   refreshParticipants();
@@ -231,6 +301,7 @@ function leaveVoice({ silent = false } = {}) {
   const wasInVoice = state.isInVoice;
   state.micStream?.getTracks().forEach((t) => t.stop());
   state.micStream = null;
+  detachAnalyser('local');
   state.isInVoice = false;
   state.isMuted = false;
   state.isDeafened = false;

@@ -8,6 +8,7 @@
   --accent: #6366f1;
   --accent-hover: #7577f3;
   --danger: #ff6b6b;
+  --speaking: #3ba55d;
   --radius: 12px;
 }
 
@@ -298,11 +299,35 @@ main {
 }
 .chat-message { max-width: 90%; }
 .chat-message-own { align-self: flex-end; text-align: right; }
+.avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px transparent;
+  transition: box-shadow 0.15s ease;
+}
+/* Live speaking indicator (Web Audio analyser in voice.js) — a ring around
+   the avatar, the way Discord highlights whoever's talking. */
+.avatar.speaking { box-shadow: 0 0 0 2px var(--speaking); }
+.avatar-sm { width: 16px; height: 16px; font-size: 9px; }
+
 .chat-message-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: var(--text-dim);
-  margin-bottom: 2px;
+  margin-bottom: 4px;
 }
+.chat-message-own .chat-message-meta { justify-content: flex-end; }
+.chat-message-author { font-weight: 700; }
 .chat-message-text {
   font-size: 13px;
   line-height: 1.4;
