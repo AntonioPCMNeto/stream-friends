@@ -37,7 +37,10 @@ const authSignUpBtn = document.getElementById('authSignUpBtn');
 const authModeToggleBtn = document.getElementById('authModeToggleBtn');
 const authDivider = document.getElementById('authDivider');
 const guestFields = document.getElementById('guestFields');
-const myServersSection = document.getElementById('myServersSection');
+const serverSidebar = document.getElementById('serverSidebar');
+const authDividerServers = document.getElementById('authDividerServers');
+const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
+const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 const serverListView = document.getElementById('serverListView');
 const myServersList = document.getElementById('myServersList');
 const createServerNameInput = document.getElementById('createServerNameInput');
@@ -182,6 +185,16 @@ function showServerListView() {
   serverListView.classList.remove('hidden');
 }
 
+// Below the mobile breakpoint the sidebar is an off-canvas overlay (see
+// style.css) — picking a channel is the one action that should always
+// close it back down, since its job (getting you into a room) is done.
+// A no-op above the breakpoint, since the sidebar has no .open state there.
+function closeSidebarOnMobile() {
+  serverSidebar.classList.remove('open');
+  sidebarBackdrop.classList.add('hidden');
+  sidebarToggleBtn.setAttribute('aria-expanded', 'false');
+}
+
 // Persistent "servers" (see rooms.js) — signed-in only, since membership is
 // tied to an account. Clicking a listed server drills into its channel
 // list (openServerChannels); entering a room only happens once a specific
@@ -282,14 +295,15 @@ async function refreshChannels() {
   channels.forEach((channel) => {
     const row = document.createElement('div');
     row.className = 'my-server-row';
+    row.classList.toggle('active', state.hasEntered && channel.id === state.roomId);
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
     const name = document.createElement('span');
     name.textContent = `# ${channel.name}`;
     row.appendChild(name);
     const activateRow = () => {
-      roomCodeInput.value = channel.id;
-      enterRoom();
+      joinRoom(channel.id, `# ${channel.name}`);
+      closeSidebarOnMobile();
     };
     row.addEventListener('click', activateRow);
     row.addEventListener('keydown', (e) => {
@@ -306,7 +320,9 @@ async function refreshChannels() {
 function applyAuthUX() {
   const signedIn = Boolean(identity);
   authStatus.classList.toggle('hidden', !signedIn);
-  myServersSection.classList.toggle('hidden', !signedIn);
+  serverSidebar.classList.toggle('hidden', !signedIn);
+  authDividerServers.classList.toggle('hidden', !signedIn);
+  sidebarToggleBtn.classList.toggle('hidden', !signedIn);
   authForm.classList.toggle('hidden', signedIn || !auth.isConfigured());
   authDivider.classList.toggle('hidden', signedIn || !auth.isConfigured());
   guestFields.classList.toggle('hidden', signedIn);
@@ -326,6 +342,75 @@ function applyAuthUX() {
   }
 }
 
+// Shared cleanup between "leave the room entirely" and "switch to a
+// different room while staying in the app shell" — local media, peer
+// connections and room-scoped UI state, nothing about which screen is
+// visible or which room we're headed to next (callers handle that).
+function teardownRoomState() {
+  stopSharing();
+  stopWebcam();
+  resetVoice();
+  closeAllPeerConnections();
+  state.knownPeers.clear();
+  state.peerUsernames.clear();
+  state.peerVerified.clear();
+  state.sharingPeers.clear();
+  state.voicePeers.clear();
+  clearChat();
+}
+
+// Set right before a mid-session channel switch's disconnect/reconnect (see
+// joinRoom below) so the 'connect' handler's reconnect toast doesn't fire
+// for a deliberate switch — only for an actual dropped connection.
+let isSwitchingChannel = false;
+
+// The shared "go to this room" path — used both for the first join from the
+// lobby (enterRoom) and for switching to a different channel while already
+// in one (see the sidebar's channel rows). displayLabel lets a channel
+// switch show "# Geral" in the room bar instead of the raw room id.
+function joinRoom(roomId, displayLabel = roomId) {
+  const isSwitch = state.hasEntered;
+  if (isSwitch) teardownRoomState();
+
+  state.roomId = roomId;
+  state.hasEntered = true;
+  saveCurrentRoom(roomId);
+
+  // Signed in + an actual room id — try to register persistent membership.
+  // Most guest codes aren't real servers and this just silently no-ops;
+  // when it is one, this is what makes "Meus Servidores" pick up someone
+  // else's invite link with no dedicated "join" UI needed.
+  if (identity && roomId) {
+    rooms.tryJoinByInvite(roomId);
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set('room', roomId);
+  window.history.replaceState({}, '', url);
+  state.currentRoomUrl = url.href;
+  roomCodeDisplay.textContent = displayLabel;
+  refreshParticipants();
+
+  lobby.style.display = 'none';
+  appScreen.style.display = '';
+
+  if (isSwitch) {
+    // server.js's join-room handler never removes a socket from its
+    // PREVIOUS Socket.IO room (no socket.leave(), no cleanup of the old
+    // room's membership map) — only an actual disconnect triggers that
+    // cleanup. Re-emitting join-room on the same live socket would leave a
+    // ghost participant behind in the channel we're leaving. Disconnecting
+    // and reconnecting re-runs the same clean teardown leaveRoom always
+    // relied on; the 'connect' handler below re-emits join-room for
+    // whatever state.roomId is by the time it fires.
+    isSwitchingChannel = true;
+    socket.disconnect();
+    socket.connect();
+  } else if (socket.connected) {
+    socket.emit('join-room', { roomId: state.roomId, username: state.myUsername, clientId, accessToken: identity?.accessToken });
+  }
+}
+
 function enterRoom() {
   const username = identity?.username || usernameInput.value.trim();
   if (!username) {
@@ -334,58 +419,25 @@ function enterRoom() {
   }
 
   const typedRoomCode = roomCodeInput.value.trim();
-  state.roomId = typedRoomCode || crypto.randomUUID().slice(0, 8);
   state.myUsername = username;
   state.myVerified = Boolean(identity);
-  state.hasEntered = true;
   saveUsername(username);
-  saveCurrentRoom(state.roomId);
 
-  // Signed in + an actual typed/shared code (not the blank-code throwaway
-  // path) — try to register persistent membership. Most codes aren't real
-  // servers and this just silently no-ops; when one is, this is what makes
-  // "Meus Servidores" pick up someone else's invite link with no dedicated
-  // "join" UI needed.
-  if (identity && typedRoomCode) {
-    rooms.tryJoinByInvite(typedRoomCode);
-  }
-
-  const url = new URL(window.location.href);
-  url.searchParams.set('room', state.roomId);
-  window.history.replaceState({}, '', url);
-  state.currentRoomUrl = url.href;
-  roomCodeDisplay.textContent = state.roomId;
-  refreshParticipants();
-
-  lobby.style.display = 'none';
-  appScreen.style.display = '';
-
-  if (socket.connected) {
-    socket.emit('join-room', { roomId: state.roomId, username: state.myUsername, clientId, accessToken: identity?.accessToken });
-  }
+  joinRoom(typedRoomCode || crypto.randomUUID().slice(0, 8));
 }
 
 // Tears down local media/connections and returns to the lobby. Reconnecting
 // the socket gives us a fresh id and lets the server's disconnect handler
 // clean up our old room membership and notify the peers we left.
 function leaveRoom() {
-  stopSharing();
-  stopWebcam();
-  resetVoice();
-  closeAllPeerConnections();
+  teardownRoomState();
   clearSavedRoom();
 
   state.hasEntered = false;
   state.roomId = null;
   state.myUsername = null;
   state.currentRoomUrl = null;
-  state.knownPeers.clear();
-  state.peerUsernames.clear();
-  state.peerVerified.clear();
-  state.sharingPeers.clear();
-  state.voicePeers.clear();
   refreshParticipants();
-  clearChat();
 
   const url = new URL(window.location.href);
   url.searchParams.delete('room');
@@ -490,6 +542,14 @@ export async function initLobby(theSocket) {
 
   backToServersBtn.addEventListener('click', showServerListView);
 
+  sidebarToggleBtn.addEventListener('click', () => {
+    const opening = !serverSidebar.classList.contains('open');
+    serverSidebar.classList.toggle('open', opening);
+    sidebarBackdrop.classList.toggle('hidden', !opening);
+    sidebarToggleBtn.setAttribute('aria-expanded', String(opening));
+  });
+  sidebarBackdrop.addEventListener('click', closeSidebarOnMobile);
+
   createChannelBtn.addEventListener('click', async () => {
     if (createChannelBtn.disabled || !selectedServer) return;
     createChannelError.textContent = '';
@@ -544,8 +604,9 @@ export async function initLobby(theSocket) {
       state.sharingPeers.clear();
       refreshParticipants();
       socket.emit('join-room', { roomId: state.roomId, username: state.myUsername, clientId, accessToken: identity?.accessToken });
-      if (hasConnectedBefore) showToast('Reconectado à sala.');
+      if (hasConnectedBefore && !isSwitchingChannel) showToast('Reconectado à sala.');
     }
+    isSwitchingChannel = false;
     hasConnectedBefore = true;
   });
 

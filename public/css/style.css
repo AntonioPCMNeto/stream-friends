@@ -23,6 +23,7 @@ body {
 }
 
 .app-header {
+  position: relative;
   padding: 28px 32px 20px;
   text-align: center;
   font-size: 26px;
@@ -35,7 +36,41 @@ body {
   text-shadow: 0 2px 24px rgba(99, 102, 241, 0.35);
 }
 
+/* Positioned absolutely (not inline before the title) so the gradient
+   title stays perfectly centered regardless of whether this button is
+   showing. display:none by default — only relevant once #appShell has a
+   sidebar to toggle at narrow widths, see the breakpoint below; the
+   ".hidden" class (toggled in lobby.js for signed-out sessions, which have
+   no sidebar at all) always wins over the media query. Its own color is
+   set explicitly since .app-header's background-clip:text + transparent
+   color would otherwise make it invisible too. */
+.sidebar-toggle-btn {
+  display: none;
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+}
+.sidebar-toggle-btn:hover { color: var(--text); border-color: var(--accent); }
+
+#appShell {
+  display: flex;
+  align-items: flex-start;
+}
+
 main {
+  flex: 1;
+  min-width: 0;
   padding: 0 20px 60px;
 }
 
@@ -134,19 +169,29 @@ main {
 }
 .auth-status.hidden { display: none; }
 
-/* Persistent "servers" list for signed-in accounts (see lobby.js/rooms.js)
-   — sits between the signed-in status row and the code-based join, which
-   stays the fallback for both guests and any code a signed-in user didn't
-   create themselves. */
-#myServersSection.hidden { display: none; }
+/* Persistent servers/channels sidebar for signed-in accounts (see
+   lobby.js/rooms.js) — a permanent fixture of the app shell (both the
+   lobby and inside a room), not just a lobby-card section, so switching
+   channels/servers never means leaving whatever screen you're on. Sticky
+   + its own scroll, same convention as .voice-sidebar. */
+#serverSidebar.hidden { display: none; }
+#serverSidebar {
+  width: 260px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 20px 16px;
+}
 #serverListView.hidden { display: none; }
 #channelsView.hidden { display: none; }
 .my-servers-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 160px;
-  overflow-y: auto;
   margin-bottom: 12px;
 }
 .my-server-row {
@@ -164,6 +209,10 @@ main {
   width: 100%;
 }
 .my-server-row:hover { border-color: var(--accent); }
+.my-server-row.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+}
 .my-server-row span {
   flex: 1;
   min-width: 0;
@@ -184,7 +233,7 @@ main {
   line-height: 1;
   cursor: pointer;
 }
-.my-server-remove:hover { background: var(--surface); color: var(--text); }
+.my-server-remove:hover { background: color-mix(in srgb, var(--danger) 22%, transparent); color: var(--danger); }
 .my-server-remove:disabled { opacity: 0.5; cursor: default; }
 .no-servers-hint { font-size: 13px; color: var(--text-dim); margin: 0 0 12px; }
 .channels-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -241,12 +290,12 @@ main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 20px;
   flex-wrap: wrap;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px 18px;
+  padding: 14px 20px;
 }
 .room-bar-left, .room-bar-right {
   display: flex;
@@ -312,8 +361,8 @@ main {
    Copiado!") can still grow instead of clipping. */
 .btn-icon { min-width: 38px; padding: 0 10px; font-size: 16px; }
 
-.bar-group { display: flex; align-items: center; gap: 8px; }
-.bar-divider { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
+.bar-group { display: flex; align-items: center; gap: 10px; }
+.bar-divider { width: 1px; height: 26px; background: var(--border); flex-shrink: 0; }
 
 .voice-control { display: flex; align-items: center; gap: 8px; }
 .voice-mic-select {
@@ -581,6 +630,34 @@ main {
 @media (max-width: 760px) {
   .room-content { flex-direction: column; }
   .voice-sidebar { width: 100%; max-height: none; }
+}
+
+/* Below this width the persistent server/channel sidebar can't sit beside
+   the room content without crowding it out, so it becomes an off-canvas
+   drawer instead: fixed, slid out of view, toggled by .sidebar-toggle-btn
+   (see .app-header) via the .open class, with a dimmed backdrop behind it
+   that closes it on click. */
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 45;
+}
+.sidebar-backdrop.hidden { display: none; }
+@media (max-width: 880px) {
+  .sidebar-toggle-btn:not(.hidden) { display: inline-flex; align-items: center; justify-content: center; }
+  #serverSidebar:not(.hidden) {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100vh;
+    max-height: 100vh;
+    z-index: 46;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  }
+  #serverSidebar.open { transform: translateX(0); }
 }
 
 .share-panel {

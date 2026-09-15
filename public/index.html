@@ -10,9 +10,41 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <header class="app-header">🖥️ Scrima aí v0.12</header>
+  <header class="app-header">
+    <button id="sidebarToggleBtn" class="sidebar-toggle-btn" aria-label="Mostrar servidores" aria-expanded="false">☰</button>
+    🖥️ Scrima aí v0.12
+  </header>
 
-  <main>
+  <div id="appShell">
+    <aside id="serverSidebar" class="hidden">
+      <div id="serverListView">
+        <div class="field-label">Meus Servidores</div>
+        <div id="myServersList" class="my-servers-list"></div>
+
+        <div class="create-server-form">
+          <input id="createServerNameInput" type="text" placeholder="Nome do novo servidor" maxlength="40">
+          <button id="createServerBtn" class="btn btn-ghost btn-small">+ Criar</button>
+        </div>
+        <p id="createServerError" class="error"></p>
+      </div>
+
+      <div id="channelsView" class="hidden">
+        <div class="channels-header">
+          <button id="backToServersBtn" type="button" class="btn-link">← Voltar</button>
+          <span id="selectedServerName" class="field-label"></span>
+        </div>
+        <div id="channelsList" class="my-servers-list"></div>
+
+        <div class="create-server-form">
+          <input id="createChannelNameInput" type="text" placeholder="Nome do novo canal" maxlength="40">
+          <button id="createChannelBtn" class="btn btn-ghost btn-small">+ Criar</button>
+        </div>
+        <p id="createChannelError" class="error"></p>
+      </div>
+    </aside>
+    <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
+
+    <main>
     <div id="lobby" class="card">
       <h2>Entre na sua conta</h2>
 
@@ -22,34 +54,7 @@
         <button id="signOutBtn" class="btn btn-ghost btn-small">Sair</button>
       </div>
 
-      <div id="myServersSection" class="hidden">
-        <div id="serverListView">
-          <div class="field-label">Meus Servidores</div>
-          <div id="myServersList" class="my-servers-list"></div>
-
-          <div class="create-server-form">
-            <input id="createServerNameInput" type="text" placeholder="Nome do novo servidor" maxlength="40">
-            <button id="createServerBtn" class="btn btn-ghost btn-small">+ Criar</button>
-          </div>
-          <p id="createServerError" class="error"></p>
-        </div>
-
-        <div id="channelsView" class="hidden">
-          <div class="channels-header">
-            <button id="backToServersBtn" type="button" class="btn-link">← Voltar</button>
-            <span id="selectedServerName" class="field-label"></span>
-          </div>
-          <div id="channelsList" class="my-servers-list"></div>
-
-          <div class="create-server-form">
-            <input id="createChannelNameInput" type="text" placeholder="Nome do novo canal" maxlength="40">
-            <button id="createChannelBtn" class="btn btn-ghost btn-small">+ Criar</button>
-          </div>
-          <p id="createChannelError" class="error"></p>
-        </div>
-
-        <p class="auth-divider">ou entre com um código</p>
-      </div>
+      <p id="authDividerServers" class="auth-divider hidden">ou entre com um código</p>
 
       <div id="authForm" class="hidden">
         <label class="field">
@@ -209,7 +214,8 @@
         </div>
       </div>
     </div>
-  </main>
+    </main>
+  </div>
 
   <footer class="app-footer">Em homenagem ao meu amigo Lucas Demétrio</footer>
 
