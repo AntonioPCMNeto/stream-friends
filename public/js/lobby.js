@@ -230,7 +230,11 @@ async function refreshMyServers() {
     row.className = 'my-server-row';
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
+    const icon = buildAvatar(room.name);
+    icon.classList.add('avatar-sm');
+    row.appendChild(icon);
     const name = document.createElement('span');
+    name.className = 'row-label';
     name.textContent = room.name;
     row.appendChild(name);
     const activateRow = () => openServerChannels(room);
@@ -298,8 +302,13 @@ async function refreshChannels() {
     row.classList.toggle('active', state.hasEntered && channel.id === state.roomId);
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
+    const hash = document.createElement('span');
+    hash.className = 'channel-hash';
+    hash.textContent = '#';
+    row.appendChild(hash);
     const name = document.createElement('span');
-    name.textContent = `# ${channel.name}`;
+    name.className = 'row-label';
+    name.textContent = channel.name;
     row.appendChild(name);
     const activateRow = () => {
       joinRoom(channel.id, `# ${channel.name}`);
