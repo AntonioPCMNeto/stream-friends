@@ -139,6 +139,8 @@ main {
    stays the fallback for both guests and any code a signed-in user didn't
    create themselves. */
 #myServersSection.hidden { display: none; }
+#serverListView.hidden { display: none; }
+#channelsView.hidden { display: none; }
 .my-servers-list {
   display: flex;
   flex-direction: column;
