@@ -488,7 +488,6 @@ main {
 .voice-active-controls .btn-icon { height: 32px; min-width: 32px; padding: 0 6px; }
 .voice-active-controls .btn-ghost { border-color: transparent; background: transparent; }
 .voice-active-controls .btn-ghost:hover { background: var(--surface); border-color: transparent; }
-#voiceLeaveBtn.btn-ghost:hover { background: color-mix(in srgb, var(--danger) 22%, transparent); color: var(--danger); }
 
 .voice-mic-select {
   height: 32px;
@@ -547,21 +546,26 @@ main {
 }
 .voice-connected-bar.hidden { display: none; }
 .voice-connected-bar:not(.hidden) + .user-bar { border-top-left-radius: 0; border-top-right-radius: 0; }
+/* Discord's own "leave call" button — a filled red pill with a phone icon
+   rotated to read as "hang up", not a plain ✕. Always red (not just on
+   hover) since it's the one destructive action in this bar. */
 .voice-disconnect-btn {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
   border: none;
-  background: transparent;
-  color: inherit;
-  font-size: 12px;
+  background: var(--danger);
+  color: white;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: background 0.15s, transform 0.1s;
 }
-.voice-disconnect-btn:hover { background: color-mix(in srgb, var(--danger) 30%, transparent); color: var(--danger); }
+.voice-disconnect-btn:hover { background: #f16060; }
+.voice-disconnect-btn:active { transform: scale(0.92); }
+.voice-disconnect-icon { font-size: 12px; line-height: 1; transform: rotate(135deg); }
 
 .user-bar-avatar { flex-shrink: 0; display: inline-flex; }
 .user-bar-avatar .avatar { width: 32px; height: 32px; font-size: 13px; }
