@@ -14,6 +14,12 @@ const sendBtn = document.getElementById('chatSendBtn');
 let socket = null;
 let unreadCount = 0;
 
+// Consecutive messages from the same author within this window are grouped
+// Discord-style — one avatar/name/timestamp header, the rest just text.
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
+let lastAuthor = null;
+let lastMessageTs = 0;
+
 function isOpen() { return !panel.classList.contains('hidden'); }
 
 function setUnread(count) {
@@ -42,34 +48,56 @@ function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function appendMessage(username, text, ts, isOwn) {
+function appendMessage(username, text, ts) {
+  const grouped = username === lastAuthor && ts - lastMessageTs < GROUP_WINDOW_MS;
+  lastAuthor = username;
+  lastMessageTs = ts;
+
   const row = document.createElement('div');
-  row.className = isOwn ? 'chat-message chat-message-own' : 'chat-message';
+  row.className = grouped ? 'chat-message chat-message-grouped' : 'chat-message';
 
-  const meta = document.createElement('div');
-  meta.className = 'chat-message-meta';
+  // Fixed-width gutter either way, so grouped rows' text lines up under the
+  // headed row's text instead of shifting left — Discord shows the
+  // timestamp here on hover for a grouped message instead of an avatar.
+  const gutter = document.createElement('div');
+  gutter.className = 'chat-message-gutter';
+  if (grouped) {
+    const hoverTime = document.createElement('span');
+    hoverTime.className = 'chat-message-hover-time';
+    hoverTime.textContent = formatTime(ts);
+    gutter.appendChild(hoverTime);
+  } else {
+    gutter.appendChild(buildAvatar(username));
+  }
+  row.appendChild(gutter);
 
-  const avatar = buildAvatar(username);
-  avatar.classList.add('avatar-sm');
-  meta.appendChild(avatar);
+  const content = document.createElement('div');
+  content.className = 'chat-message-content';
 
-  const authorEl = document.createElement('span');
-  authorEl.className = 'chat-message-author';
-  authorEl.style.color = colorForName(username);
-  authorEl.textContent = username;
-  meta.appendChild(authorEl);
+  if (!grouped) {
+    const meta = document.createElement('div');
+    meta.className = 'chat-message-meta';
 
-  const timeEl = document.createElement('span');
-  timeEl.textContent = formatTime(ts);
-  meta.appendChild(timeEl);
+    const authorEl = document.createElement('span');
+    authorEl.className = 'chat-message-author';
+    authorEl.style.color = colorForName(username);
+    authorEl.textContent = username;
+    meta.appendChild(authorEl);
 
-  row.appendChild(meta);
+    const timeEl = document.createElement('span');
+    timeEl.className = 'chat-message-time';
+    timeEl.textContent = formatTime(ts);
+    meta.appendChild(timeEl);
+
+    content.appendChild(meta);
+  }
 
   const body = document.createElement('div');
   body.className = 'chat-message-text';
   body.textContent = text;
-  row.appendChild(body);
+  content.appendChild(body);
 
+  row.appendChild(content);
   messagesEl.appendChild(row);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -87,13 +115,15 @@ export function clearChat() {
   messagesEl.innerHTML = '';
   setUnread(0);
   closePanel();
+  lastAuthor = null;
+  lastMessageTs = 0;
 }
 
 export function initChat(theSocket) {
   socket = theSocket;
 
-  socket.on('chat-message', ({ from, username, text, ts }) => {
-    appendMessage(username, text, ts, from === socket.id);
+  socket.on('chat-message', ({ username, text, ts }) => {
+    appendMessage(username, text, ts);
     if (!isOpen()) setUnread(unreadCount + 1);
   });
 

@@ -711,13 +711,41 @@ main {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 16px;
+  padding: 12px 8px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
-.chat-message { max-width: 90%; }
-.chat-message-own { align-self: flex-end; text-align: right; }
+/* Discord's own message format — flush-left, no bubble, no distinction for
+   your own messages (Discord doesn't color/align those differently either).
+   Consecutive messages from the same author within GROUP_WINDOW_MS (chat.js)
+   collapse the avatar/name/timestamp header down to just a hover-reveal
+   timestamp in the same gutter column, so the text stays aligned. */
+.chat-message {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 1px 8px;
+  border-radius: 6px;
+}
+.chat-message-grouped { margin-top: 1px; }
+.chat-message:hover { background: var(--surface-2); }
+.chat-message-gutter {
+  width: 32px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding-top: 2px;
+}
+.chat-message-gutter .avatar { width: 32px; height: 32px; font-size: 13px; }
+.chat-message-hover-time {
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0;
+  padding-top: 4px;
+  transition: opacity 0.1s;
+}
+.chat-message:hover .chat-message-hover-time { opacity: 1; }
+.chat-message-content { flex: 1; min-width: 0; }
 .avatar {
   width: 24px;
   height: 24px;
@@ -739,25 +767,18 @@ main {
 
 .chat-message-meta {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-dim);
-  margin-bottom: 4px;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
 }
-.chat-message-own .chat-message-meta { justify-content: flex-end; }
-.chat-message-author { font-weight: 700; }
+.chat-message-author { font-weight: 600; font-size: 14px; color: var(--text); }
+.chat-message-time { font-size: 11px; color: var(--text-dim); }
 .chat-message-text {
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: 14px;
+  line-height: 1.45;
   overflow-wrap: break-word;
-  background: var(--surface-2);
-  border-radius: 10px;
-  padding: 7px 11px;
-  display: inline-block;
-  text-align: left;
+  color: var(--text);
 }
-.chat-message-own .chat-message-text { background: var(--accent); color: white; }
 .chat-input-row {
   display: flex;
   gap: 8px;
@@ -826,11 +847,20 @@ main {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
 }
-.voice-badge {
-  font-size: 12px;
-  line-height: 1;
-  flex-shrink: 0;
+/* Discord-style presence dot on the avatar itself, replacing a text badge —
+   cut into the avatar via a border matching the row's own background so it
+   reads as "attached to" the avatar rather than floating next to it. */
+.avatar-wrap { position: relative; display: inline-flex; flex-shrink: 0; }
+.status-dot {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
 }
+.status-dot-voice { background: var(--speaking); }
 .verified-badge {
   font-size: 11px;
   font-weight: 700;
