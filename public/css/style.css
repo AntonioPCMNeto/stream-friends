@@ -169,7 +169,25 @@ main {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.my-server-remove {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.my-server-remove:hover { background: var(--surface); color: var(--text); }
+.my-server-remove:disabled { opacity: 0.5; cursor: default; }
 .no-servers-hint { font-size: 13px; color: var(--text-dim); margin: 0 0 12px; }
+.channels-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.channels-header .field-label { margin: 0; }
+.channels-header .btn-link { display: inline; width: auto; margin-top: 0; white-space: nowrap; }
 .create-server-form { display: flex; gap: 8px; margin-bottom: 4px; }
 .create-server-form input {
   flex: 1;

@@ -38,10 +38,18 @@ const authModeToggleBtn = document.getElementById('authModeToggleBtn');
 const authDivider = document.getElementById('authDivider');
 const guestFields = document.getElementById('guestFields');
 const myServersSection = document.getElementById('myServersSection');
+const serverListView = document.getElementById('serverListView');
 const myServersList = document.getElementById('myServersList');
 const createServerNameInput = document.getElementById('createServerNameInput');
 const createServerBtn = document.getElementById('createServerBtn');
 const createServerError = document.getElementById('createServerError');
+const channelsView = document.getElementById('channelsView');
+const backToServersBtn = document.getElementById('backToServersBtn');
+const selectedServerName = document.getElementById('selectedServerName');
+const channelsList = document.getElementById('channelsList');
+const createChannelNameInput = document.getElementById('createChannelNameInput');
+const createChannelBtn = document.getElementById('createChannelBtn');
+const createChannelError = document.getElementById('createChannelError');
 
 let socket = null;
 
@@ -161,9 +169,23 @@ function applyAuthMode() {
   authError.textContent = '';
 }
 
+// The server a user has drilled into in the lobby (see openServerChannels
+// below) — null while browsing the server list itself. Not room state:
+// this is purely about which view the "Meus Servidores" card is showing,
+// unrelated to state.roomId (which only gets set once a channel is
+// actually entered).
+let selectedServer = null;
+
+function showServerListView() {
+  selectedServer = null;
+  channelsView.classList.add('hidden');
+  serverListView.classList.remove('hidden');
+}
+
 // Persistent "servers" (see rooms.js) — signed-in only, since membership is
-// tied to an account. Clicking a listed server just drives the same
-// enterRoom() a typed code does; there's no separate entry path.
+// tied to an account. Clicking a listed server drills into its channel
+// list (openServerChannels); entering a room only happens once a specific
+// channel is picked there.
 //
 // Supabase's auth listener can fire more than once in quick succession
 // while a session is being resolved on load, so this can end up called
@@ -172,6 +194,7 @@ function applyAuthMode() {
 // of appending onto a list an older call already started clearing/filling.
 let serversRequestId = 0;
 async function refreshMyServers() {
+  showServerListView(); // this always means "show me my servers" — drop any open channel view
   const requestId = ++serversRequestId;
   const myRooms = await rooms.listMyRooms();
   if (requestId !== serversRequestId) return;
@@ -187,17 +210,92 @@ async function refreshMyServers() {
   }
 
   myRooms.forEach((room) => {
-    const row = document.createElement('button');
-    row.type = 'button';
+    // A plain div, not a <button> — it now has a real <button> nested inside
+    // it (the remove action), and a button can't legally contain a button.
+    // tabindex + keydown keep it keyboard-accessible like the button it replaces.
+    const row = document.createElement('div');
     row.className = 'my-server-row';
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
     const name = document.createElement('span');
     name.textContent = room.name;
     row.appendChild(name);
-    row.addEventListener('click', () => {
-      roomCodeInput.value = room.id;
-      enterRoom();
+    const activateRow = () => openServerChannels(room);
+    row.addEventListener('click', activateRow);
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activateRow(); }
     });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'my-server-remove';
+    removeBtn.textContent = '✕';
+    removeBtn.title = `Sair de "${room.name}"`;
+    removeBtn.addEventListener('click', async (e) => {
+      e.stopPropagation(); // don't also trigger the row's own "enter room" click
+      if (!confirm(`Sair de "${room.name}"? Você só volta a entrar com um novo convite.`)) return;
+      removeBtn.disabled = true;
+      const { error } = await rooms.leaveRoom(room.id);
+      if (error) {
+        showToast(error, 'error');
+        removeBtn.disabled = false;
+        return;
+      }
+      refreshMyServers();
+    });
+    row.appendChild(removeBtn);
+
     myServersList.appendChild(row);
+  });
+}
+
+// Drills into one server's channel list, replacing the server list in the
+// same card (see showServerListView for the way back).
+function openServerChannels(room) {
+  selectedServer = room;
+  selectedServerName.textContent = room.name;
+  createChannelError.textContent = '';
+  serverListView.classList.add('hidden');
+  channelsView.classList.remove('hidden');
+  refreshChannels();
+}
+
+// Same request-token guard as refreshMyServers, for the same reason
+// (overlapping calls shouldn't let a stale response render over a newer one).
+let channelsRequestId = 0;
+async function refreshChannels() {
+  const server = selectedServer;
+  const requestId = ++channelsRequestId;
+  const channels = await rooms.listChannels(server.id);
+  if (requestId !== channelsRequestId || selectedServer !== server) return;
+
+  channelsList.innerHTML = '';
+
+  if (channels.length === 0) {
+    const hint = document.createElement('p');
+    hint.className = 'no-servers-hint';
+    hint.textContent = 'Nenhum canal ainda.';
+    channelsList.appendChild(hint);
+    return;
+  }
+
+  channels.forEach((channel) => {
+    const row = document.createElement('div');
+    row.className = 'my-server-row';
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    const name = document.createElement('span');
+    name.textContent = `# ${channel.name}`;
+    row.appendChild(name);
+    const activateRow = () => {
+      roomCodeInput.value = channel.id;
+      enterRoom();
+    };
+    row.addEventListener('click', activateRow);
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activateRow(); }
+    });
+    channelsList.appendChild(row);
   });
 }
 
@@ -222,6 +320,7 @@ function applyAuthUX() {
     usernameInput.value = identity.username || '';
     refreshMyServers();
   } else {
+    showServerListView(); // don't leave a signed-out session's lobby stuck mid-channel-view for next time
     applyAuthMode();
     applyReturningUserUX();
   }
@@ -387,6 +486,29 @@ export async function initLobby(theSocket) {
   });
   createServerNameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') createServerBtn.click();
+  });
+
+  backToServersBtn.addEventListener('click', showServerListView);
+
+  createChannelBtn.addEventListener('click', async () => {
+    if (createChannelBtn.disabled || !selectedServer) return;
+    createChannelError.textContent = '';
+    const name = createChannelNameInput.value.trim();
+    if (!name) { createChannelError.textContent = 'Dê um nome ao canal.'; return; }
+
+    createChannelBtn.disabled = true;
+    try {
+      const { error } = await rooms.createChannel(selectedServer.id, name);
+      if (error) { createChannelError.textContent = error; return; }
+
+      createChannelNameInput.value = '';
+      refreshChannels();
+    } finally {
+      createChannelBtn.disabled = false;
+    }
+  });
+  createChannelNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') createChannelBtn.click();
   });
 
   copyLinkBtn.addEventListener('click', async () => {

@@ -44,3 +44,41 @@ export async function tryJoinByInvite(roomId) {
   if (error) return null;
   return data;
 }
+
+// Removes your own membership row, dropping the server off "Meus
+// Servidores". Doesn't touch the room itself or other members — same
+// RPC-only convention as createRoom/tryJoinByInvite, since RLS only grants
+// SELECT on room_members directly.
+export async function leaveRoom(roomId) {
+  const supabase = getClient();
+  if (!supabase) return { error: 'Contas não estão configuradas neste servidor.' };
+  const { error } = await supabase.rpc('leave_room', { target_room_id: roomId });
+  if (error) return { error: error.message };
+  return {};
+}
+
+// A server's channels, newest last. RLS scopes this to servers you're a
+// member of (see the channels SELECT policy) — no client-side filtering
+// needed. Every server always has at least a default "Geral" channel,
+// created by a DB trigger on the room itself.
+export async function listChannels(roomId) {
+  const supabase = getClient();
+  if (!supabase) return [];
+  const { data, error } = await supabase.from('channels').select('id, name').eq('room_id', roomId).order('created_at');
+  if (error) {
+    console.error('Failed to list channels:', error);
+    return [];
+  }
+  return data || [];
+}
+
+// Returns { channel } on success or { error } — same convention as
+// createRoom. Goes through the create_channel RPC (not a direct insert)
+// since it also checks the caller is actually a member of the room.
+export async function createChannel(roomId, name) {
+  const supabase = getClient();
+  if (!supabase) return { error: 'Contas não estão configuradas neste servidor.' };
+  const { data, error } = await supabase.rpc('create_channel', { target_room_id: roomId, channel_name: name });
+  if (error) return { error: error.message };
+  return { channel: data };
+}

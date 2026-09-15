@@ -23,14 +23,31 @@
       </div>
 
       <div id="myServersSection" class="hidden">
-        <div class="field-label">Meus Servidores</div>
-        <div id="myServersList" class="my-servers-list"></div>
+        <div id="serverListView">
+          <div class="field-label">Meus Servidores</div>
+          <div id="myServersList" class="my-servers-list"></div>
 
-        <div class="create-server-form">
-          <input id="createServerNameInput" type="text" placeholder="Nome do novo servidor" maxlength="40">
-          <button id="createServerBtn" class="btn btn-ghost btn-small">+ Criar</button>
+          <div class="create-server-form">
+            <input id="createServerNameInput" type="text" placeholder="Nome do novo servidor" maxlength="40">
+            <button id="createServerBtn" class="btn btn-ghost btn-small">+ Criar</button>
+          </div>
+          <p id="createServerError" class="error"></p>
         </div>
-        <p id="createServerError" class="error"></p>
+
+        <div id="channelsView" class="hidden">
+          <div class="channels-header">
+            <button id="backToServersBtn" type="button" class="btn-link">← Voltar</button>
+            <span id="selectedServerName" class="field-label"></span>
+          </div>
+          <div id="channelsList" class="my-servers-list"></div>
+
+          <div class="create-server-form">
+            <input id="createChannelNameInput" type="text" placeholder="Nome do novo canal" maxlength="40">
+            <button id="createChannelBtn" class="btn btn-ghost btn-small">+ Criar</button>
+          </div>
+          <p id="createChannelError" class="error"></p>
+        </div>
+
         <p class="auth-divider">ou entre com um código</p>
       </div>
 
