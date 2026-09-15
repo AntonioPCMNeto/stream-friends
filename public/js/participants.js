@@ -8,6 +8,8 @@ const panel = document.getElementById('participantsPanel');
 const listEl = document.getElementById('participantsList');
 const voiceSidebar = document.getElementById('voiceSidebar');
 const voiceSidebarList = document.getElementById('voiceSidebarList');
+const userBarAvatar = document.getElementById('userBarAvatar');
+const userBarName = document.getElementById('userBarName');
 
 function openPanel() { panel.classList.remove('hidden'); }
 function closePanel() { panel.classList.add('hidden'); }
@@ -30,7 +32,7 @@ function buildRow(name, purposes, isMe, inVoice, peerId, verified) {
     const badge = document.createElement('span');
     badge.className = 'verified-badge';
     badge.textContent = '✓';
-    badge.title = 'Conta verificada (Discord)';
+    badge.title = 'Conta verificada';
     row.appendChild(badge);
   }
 
@@ -81,6 +83,10 @@ export function refreshParticipants() {
 
   countEl.textContent = state.knownPeers.size + (state.myUsername ? 1 : 0);
   voiceSidebar.classList.toggle('hidden', !state.isInVoice);
+
+  userBarName.textContent = state.myUsername || '';
+  userBarAvatar.innerHTML = '';
+  if (state.myUsername) userBarAvatar.appendChild(buildAvatar(state.myUsername));
 }
 
 // Toggles the speaking ring on a peer's avatar wherever it's currently

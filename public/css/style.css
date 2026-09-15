@@ -424,8 +424,6 @@ main {
 .bar-group { display: flex; align-items: center; gap: 10px; }
 .bar-divider { width: 1px; height: 26px; background: var(--border); flex-shrink: 0; }
 
-.voice-control { display: flex; align-items: center; gap: 8px; }
-
 /* Distinct from the other ghost icon buttons — voice is an entry point
    into a whole feature (mic capture, a peer mesh), not a toggle, so it
    gets its own tint (the same --speaking green already used for voice
@@ -472,6 +470,115 @@ main {
 }
 .voice-mic-select:focus { outline: none; background: var(--surface); border-color: var(--accent); }
 .voice-mic-select:hover { background: var(--surface); }
+
+/* Persistent bottom-left identity/voice bar (Discord-style, see index.html)
+   — fixed to the viewport rather than laid out in .room-content, so it
+   stays put through scrolling and through server/channel switches. Same
+   260px + 16px-from-edge footprint as #serverSidebar so it lines up under
+   it for signed-in accounts, but it renders for guests too (no sidebar)
+   since mute/deafen are relevant to everyone in a room. */
+.user-bar-wrap {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 40;
+  width: 260px;
+  max-width: calc(100vw - 32px);
+}
+.user-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+/* The "leave" affordance lives here instead of the icon row below, the way
+   Discord separates disconnecting from mute/deafen — keeps that row to 3
+   icons (mute/deafen/settings) instead of 4 at a 260px width. */
+.voice-connected-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: color-mix(in srgb, var(--speaking) 16%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--speaking) 45%, var(--border));
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 6px 8px 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--speaking);
+}
+.voice-connected-bar.hidden { display: none; }
+.voice-connected-bar:not(.hidden) + .user-bar { border-top-left-radius: 0; border-top-right-radius: 0; }
+.voice-disconnect-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.voice-disconnect-btn:hover { background: color-mix(in srgb, var(--danger) 30%, transparent); color: var(--danger); }
+
+.user-bar-avatar { flex-shrink: 0; display: inline-flex; }
+.user-bar-avatar .avatar { width: 32px; height: 32px; font-size: 13px; }
+.user-bar-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.user-bar-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-bar-status {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-bar-controls { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.user-bar-controls .btn-icon { height: 30px; min-width: 30px; padding: 0 5px; font-size: 14px; }
+/* Flatten the reused .voice-active-controls/.btn-voice-join pill styling
+   (originally a standalone group in the top room-bar) so the icons sit
+   directly in the user bar instead of showing as a pill-in-a-pill. */
+.user-bar .voice-active-controls { background: transparent; border: none; padding: 0; gap: 2px; }
+.user-bar .btn-voice-join { height: 30px; min-width: 30px; padding: 0; }
+#userBarSettingsBtn[aria-expanded="true"] { background: var(--surface-2); color: var(--text); border-color: var(--accent); }
+
+.user-bar-popover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 10px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+.user-bar-popover.hidden { display: none; }
+.user-bar-popover .voice-mic-select {
+  width: 100%;
+  max-width: none;
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+@media (max-width: 420px) {
+  .user-bar-wrap { left: 8px; bottom: 8px; }
+}
 
 /* Floating launcher (not in normal flow — see index.html), same corner the
    chat panel itself opens in; hidden while the panel is open so the two

@@ -80,10 +80,14 @@ function detachAnalyser(id) {
 
 const joinBtn = document.getElementById('voiceJoinBtn');
 const activeControls = document.getElementById('voiceActiveControls');
+const connectedBar = document.getElementById('voiceConnectedBar');
 const micSelect = document.getElementById('voiceMicSelect');
 const muteBtn = document.getElementById('voiceMuteBtn');
 const deafenBtn = document.getElementById('voiceDeafenBtn');
 const leaveBtn = document.getElementById('voiceLeaveBtn');
+const statusEl = document.getElementById('userBarStatus');
+const settingsBtn = document.getElementById('userBarSettingsBtn');
+const settingsPopover = document.getElementById('userBarPopover');
 
 // Restored when un-deafening: deafen forces mute, but un-deafening should
 // leave you however you were before, not always unmuted.
@@ -98,6 +102,7 @@ function setVoiceUI() {
   const inVoice = state.isInVoice;
   joinBtn.classList.toggle('hidden', inVoice);
   activeControls.classList.toggle('hidden', !inVoice);
+  connectedBar.classList.toggle('hidden', !inVoice);
 
   // Colour is the whole signal — btn-danger when active — so the icon can
   // stay put instead of swapping to a hard-to-read "slashed" emoji.
@@ -110,6 +115,28 @@ function setVoiceUI() {
   deafenBtn.classList.toggle('btn-ghost', !state.isDeafened);
   deafenBtn.setAttribute('aria-pressed', String(state.isDeafened));
   deafenBtn.title = state.isDeafened ? 'Desativar surdina' : 'Ensurdecer';
+
+  if (!inVoice) statusEl.textContent = 'Desconectado';
+  else if (state.isDeafened) statusEl.textContent = '🔇 Ensurdecido';
+  else if (state.isMuted) statusEl.textContent = '🎤 Silenciado';
+  else statusEl.textContent = '🎧 Em áudio';
+
+  if (!inVoice) closeSettingsPopover();
+}
+
+function closeSettingsPopover() {
+  settingsPopover.classList.add('hidden');
+  settingsBtn.setAttribute('aria-expanded', 'false');
+}
+
+function toggleSettingsPopover() {
+  if (!state.isInVoice) {
+    showToast('Entre no áudio para trocar o microfone.', 'error');
+    return;
+  }
+  const opening = settingsPopover.classList.contains('hidden');
+  settingsPopover.classList.toggle('hidden', !opening);
+  settingsBtn.setAttribute('aria-expanded', String(opening));
 }
 
 // track.enabled=false keeps the sender/PC up and just sends silence — no
@@ -349,7 +376,20 @@ export function initVoice(theSocket) {
   leaveBtn.addEventListener('click', () => leaveVoice());
   muteBtn.addEventListener('click', toggleMute);
   deafenBtn.addEventListener('click', toggleDeafen);
-  micSelect.addEventListener('change', () => switchMicDevice(micSelect.value));
+  settingsBtn.addEventListener('click', toggleSettingsPopover);
+  micSelect.addEventListener('change', () => {
+    switchMicDevice(micSelect.value);
+    closeSettingsPopover();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!settingsPopover.classList.contains('hidden') && !e.target.closest('.user-bar-controls') && !e.target.closest('.user-bar-popover')) {
+      closeSettingsPopover();
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSettingsPopover();
+  });
 
   // Mic plugged/unplugged mid-call — refresh the dropdown's options (not the
   // active device; switchMicDevice only runs on an explicit user pick).

@@ -107,16 +107,6 @@
           <div class="bar-group">
             <button id="startWebcamBtn" class="btn btn-ghost btn-icon" title="Compartilhar Webcam" aria-label="Compartilhar Webcam">📷</button>
             <button id="switchCameraBtn" class="btn btn-ghost btn-icon hidden" title="Trocar câmera" aria-label="Trocar câmera">🔄</button>
-
-            <div class="voice-control">
-              <button id="voiceJoinBtn" class="btn btn-voice-join" title="Entrar no áudio" aria-label="Entrar no áudio">🎧 Áudio</button>
-              <div id="voiceActiveControls" class="voice-active-controls hidden">
-                <select id="voiceMicSelect" class="voice-mic-select" title="Microfone" aria-label="Microfone"></select>
-                <button id="voiceMuteBtn" class="btn btn-ghost btn-icon" aria-pressed="false" title="Silenciar microfone">🎤</button>
-                <button id="voiceDeafenBtn" class="btn btn-ghost btn-icon" aria-pressed="false" title="Ensurdecer">🎧</button>
-                <button id="voiceLeaveBtn" class="btn btn-ghost btn-icon" title="Sair do áudio" aria-label="Sair do áudio">📞</button>
-              </div>
-            </div>
           </div>
 
           <span class="bar-divider"></span>
@@ -180,6 +170,41 @@
             </div>
 
             <button id="leaveRoomBtn" class="btn btn-ghost btn-icon" title="Sair da Sala" aria-label="Sair da Sala">🚪</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Persistent bottom-left identity/voice bar, Discord-style — fixed to
+           the viewport (not part of .room-content's flow) so it stays put
+           regardless of scroll or which server/channel view is open. Lives
+           for both guests and signed-in accounts (unlike #serverSidebar,
+           which is account-only), since mute/deafen matter to everyone once
+           inside a room. -->
+      <div id="userBarWrap" class="user-bar-wrap">
+        <!-- Only shown while connected — mirrors Discord's own "leave this
+             voice channel" affordance living apart from mute/deafen, which
+             keeps the main row below down to 3 icons instead of 4. -->
+        <div id="voiceConnectedBar" class="voice-connected-bar hidden">
+          <span>🎧 No áudio</span>
+          <button id="voiceLeaveBtn" class="voice-disconnect-btn" title="Sair do áudio" aria-label="Sair do áudio">✕</button>
+        </div>
+        <div id="userBar" class="user-bar">
+          <div id="userBarPopover" class="user-bar-popover hidden">
+            <div class="field-label">Microfone</div>
+            <select id="voiceMicSelect" class="voice-mic-select" aria-label="Microfone"></select>
+          </div>
+          <span id="userBarAvatar" class="user-bar-avatar"></span>
+          <div class="user-bar-info">
+            <span id="userBarName" class="user-bar-name"></span>
+            <span id="userBarStatus" class="user-bar-status">Desconectado</span>
+          </div>
+          <div class="user-bar-controls">
+            <button id="voiceJoinBtn" class="btn btn-voice-join btn-icon" title="Entrar no áudio" aria-label="Entrar no áudio">🎧</button>
+            <div id="voiceActiveControls" class="voice-active-controls hidden">
+              <button id="voiceMuteBtn" class="btn btn-ghost btn-icon" aria-pressed="false" title="Silenciar microfone">🎤</button>
+              <button id="voiceDeafenBtn" class="btn btn-ghost btn-icon" aria-pressed="false" title="Ensurdecer">🎧</button>
+            </div>
+            <button id="userBarSettingsBtn" class="btn btn-ghost btn-icon" title="Configurações de áudio" aria-label="Configurações de áudio" aria-expanded="false" aria-haspopup="true">⚙️</button>
           </div>
         </div>
       </div>
