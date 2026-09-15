@@ -332,6 +332,7 @@ function applyAuthUX() {
   serverSidebar.classList.toggle('hidden', !signedIn);
   authDividerServers.classList.toggle('hidden', !signedIn);
   sidebarToggleBtn.classList.toggle('hidden', !signedIn);
+  document.body.classList.toggle('has-sidebar', signedIn);
   authForm.classList.toggle('hidden', signedIn || !auth.isConfigured());
   authDivider.classList.toggle('hidden', signedIn || !auth.isConfigured());
   guestFields.classList.toggle('hidden', signedIn);

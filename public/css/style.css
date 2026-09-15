@@ -74,6 +74,17 @@ main {
   padding: 0 20px 60px;
 }
 
+/* #serverSidebar only eats space on the LEFT (260px width + 16px left
+   margin, see its own rule), so centering .card/.room-bar via plain
+   margin:auto inside main centers them in the narrower remaining strip —
+   visually right-shifted from the page's true center. Mirroring that same
+   276px as extra right padding here (only once the sidebar is actually in
+   flow — signed in, and above the breakpoint where it becomes an
+   off-canvas overlay instead) cancels the asymmetry back out. */
+@media (min-width: 881px) {
+  body.has-sidebar main { padding-right: calc(20px + 276px); }
+}
+
 .btn {
   height: 38px;
   padding: 0 18px;
