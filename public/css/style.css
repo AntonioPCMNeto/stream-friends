@@ -183,7 +183,9 @@ main {
   max-height: calc(100vh - 32px);
   overflow-y: auto;
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 16px 0 16px 16px;
   padding: 20px 16px;
 }
 #serverListView.hidden { display: none; }
@@ -412,19 +414,53 @@ main {
 .bar-divider { width: 1px; height: 26px; background: var(--border); flex-shrink: 0; }
 
 .voice-control { display: flex; align-items: center; gap: 8px; }
+
+/* Distinct from the other ghost icon buttons — voice is an entry point
+   into a whole feature (mic capture, a peer mesh), not a toggle, so it
+   gets its own tint (the same --speaking green already used for voice
+   activity elsewhere) rather than blending into the row. */
+.btn-voice-join {
+  background: color-mix(in srgb, var(--speaking) 16%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--speaking) 45%, var(--border));
+  color: var(--speaking);
+}
+.btn-voice-join:hover {
+  background: color-mix(in srgb, var(--speaking) 28%, var(--surface-2));
+  border-color: var(--speaking);
+  color: var(--text);
+}
+
+/* Everything that only makes sense once you're actually in voice (device
+   picker, mute/deafen/hang-up) reads as one grouped control, not four
+   independent buttons competing with voiceJoinBtn for attention. */
+.voice-active-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+}
+.voice-active-controls.hidden { display: none; }
+.voice-active-controls .btn-icon { height: 32px; min-width: 32px; padding: 0 6px; }
+.voice-active-controls .btn-ghost { border-color: transparent; background: transparent; }
+.voice-active-controls .btn-ghost:hover { background: var(--surface); border-color: transparent; }
+#voiceLeaveBtn.btn-ghost:hover { background: color-mix(in srgb, var(--danger) 22%, transparent); color: var(--danger); }
+
 .voice-mic-select {
-  height: 38px;
+  height: 32px;
   max-width: 170px;
   padding: 0 8px;
   font-size: 13px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text);
   cursor: pointer;
 }
-.voice-mic-select:focus { outline: none; border-color: var(--accent); }
-.voice-mic-select.hidden { display: none; }
+.voice-mic-select:focus { outline: none; background: var(--surface); border-color: var(--accent); }
+.voice-mic-select:hover { background: var(--surface); }
 
 /* Floating launcher (not in normal flow — see index.html), same corner the
    chat panel itself opens in; hidden while the panel is open so the two
@@ -699,6 +735,10 @@ main {
     top: 0;
     height: 100vh;
     max-height: 100vh;
+    margin: 0;
+    border-radius: 0;
+    border: none;
+    border-right: 1px solid var(--border);
     z-index: 46;
     transform: translateX(-100%);
     transition: transform 0.2s ease;

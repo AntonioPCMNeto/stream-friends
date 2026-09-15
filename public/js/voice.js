@@ -79,6 +79,7 @@ function detachAnalyser(id) {
 }
 
 const joinBtn = document.getElementById('voiceJoinBtn');
+const activeControls = document.getElementById('voiceActiveControls');
 const micSelect = document.getElementById('voiceMicSelect');
 const muteBtn = document.getElementById('voiceMuteBtn');
 const deafenBtn = document.getElementById('voiceDeafenBtn');
@@ -96,10 +97,7 @@ let micSwitchInFlight = false;
 function setVoiceUI() {
   const inVoice = state.isInVoice;
   joinBtn.classList.toggle('hidden', inVoice);
-  micSelect.classList.toggle('hidden', !inVoice);
-  muteBtn.classList.toggle('hidden', !inVoice);
-  deafenBtn.classList.toggle('hidden', !inVoice);
-  leaveBtn.classList.toggle('hidden', !inVoice);
+  activeControls.classList.toggle('hidden', !inVoice);
 
   // Colour is the whole signal — btn-danger when active — so the icon can
   // stay put instead of swapping to a hard-to-read "slashed" emoji.

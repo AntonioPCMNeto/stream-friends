@@ -109,11 +109,13 @@
             <button id="switchCameraBtn" class="btn btn-ghost btn-icon hidden" title="Trocar câmera" aria-label="Trocar câmera">🔄</button>
 
             <div class="voice-control">
-              <button id="voiceJoinBtn" class="btn btn-ghost btn-icon" title="Entrar no áudio" aria-label="Entrar no áudio">🎧</button>
-              <select id="voiceMicSelect" class="voice-mic-select hidden" title="Microfone" aria-label="Microfone"></select>
-              <button id="voiceMuteBtn" class="btn btn-ghost btn-icon hidden" aria-pressed="false" title="Silenciar microfone">🎤</button>
-              <button id="voiceDeafenBtn" class="btn btn-ghost btn-icon hidden" aria-pressed="false" title="Ensurdecer">🎧</button>
-              <button id="voiceLeaveBtn" class="btn btn-ghost btn-icon hidden" title="Sair do áudio" aria-label="Sair do áudio">📞</button>
+              <button id="voiceJoinBtn" class="btn btn-voice-join" title="Entrar no áudio" aria-label="Entrar no áudio">🎧 Áudio</button>
+              <div id="voiceActiveControls" class="voice-active-controls hidden">
+                <select id="voiceMicSelect" class="voice-mic-select" title="Microfone" aria-label="Microfone"></select>
+                <button id="voiceMuteBtn" class="btn btn-ghost btn-icon" aria-pressed="false" title="Silenciar microfone">🎤</button>
+                <button id="voiceDeafenBtn" class="btn btn-ghost btn-icon" aria-pressed="false" title="Ensurdecer">🎧</button>
+                <button id="voiceLeaveBtn" class="btn btn-ghost btn-icon" title="Sair do áudio" aria-label="Sair do áudio">📞</button>
+              </div>
             </div>
           </div>
 
