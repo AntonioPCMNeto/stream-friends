@@ -16,6 +16,12 @@
   </header>
 
   <div id="appShell">
+    <!-- Discord's own leftmost strip — circular server icons for quick
+         switching, additive to (not a replacement for) the full "Meus
+         Servidores" list in #serverSidebar, which still owns creating a
+         server and the channel drill-down. Desktop-only (see the sidebar's
+         own off-canvas breakpoint) — mobile keeps using the existing list. -->
+    <nav id="serverRail" class="server-rail hidden"></nav>
     <aside id="serverSidebar" class="hidden">
       <div id="serverListView">
         <div class="sidebar-section-label">Meus Servidores</div>
@@ -219,12 +225,18 @@
       </div>
 
       <div class="room-content">
-        <aside id="voiceSidebar" class="voice-sidebar hidden">
-          <div class="field-label">🎧 No áudio</div>
-          <div id="voiceSidebarList" class="voice-sidebar-list"></div>
-        </aside>
-
         <div id="videos" class="video-grid"></div>
+
+        <!-- Persistent Discord-style member list — everyone in the room,
+             not just voice (each row already carries a 🎧 badge + speaking
+             ring when applicable, see participants.js), docked to the right
+             instead of a dropdown. Below the breakpoint it's hidden in favor
+             of the #participantsPanel dropdown (see .participants-control),
+             the same off-canvas-vs-docked split #serverSidebar already uses. -->
+        <aside id="memberList" class="member-list">
+          <div class="field-label">Participantes</div>
+          <div id="memberListItems" class="participants-list"></div>
+        </aside>
       </div>
 
       <!-- Floating launcher, not part of the room bar — chat is a separate,

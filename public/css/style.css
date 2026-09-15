@@ -74,15 +74,16 @@ main {
   padding: 0 20px 60px;
 }
 
-/* #serverSidebar only eats space on the LEFT (260px width + 16px left
-   margin, see its own rule), so centering .card/.room-bar via plain
-   margin:auto inside main centers them in the narrower remaining strip —
-   visually right-shifted from the page's true center. Mirroring that same
-   276px as extra right padding here (only once the sidebar is actually in
-   flow — signed in, and above the breakpoint where it becomes an
-   off-canvas overlay instead) cancels the asymmetry back out. */
+/* .server-rail + #serverSidebar only eat space on the LEFT (60px+16px
+   rail, 260px+16px sidebar, see their own rules), so centering .card/
+   .room-bar via plain margin:auto inside main centers them in the
+   narrower remaining strip — visually right-shifted from the page's true
+   center. Mirroring that same 352px as extra right padding here (only
+   once they're actually in flow — signed in, and above the breakpoint
+   where they become an off-canvas overlay instead) cancels the asymmetry
+   back out. */
 @media (min-width: 881px) {
-  body.has-sidebar main { padding-right: calc(20px + 276px); }
+  body.has-sidebar main { padding-right: calc(20px + 352px); }
 }
 
 .btn {
@@ -180,11 +181,55 @@ main {
 }
 .auth-status.hidden { display: none; }
 
+/* Discord's own leftmost strip — circular server icons for quick switching
+   (see lobby.js's refreshMyServers, which populates both this and the full
+   list below in one pass). Sticky, same convention as #serverSidebar right
+   next to it; hidden together with it below the mobile breakpoint. */
+.server-rail.hidden { display: none; }
+.server-rail {
+  width: 60px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 16px 16px;
+  padding: 8px 0;
+}
+.server-rail-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-radius 0.15s, box-shadow 0.15s;
+}
+.server-rail-icon .avatar { width: 44px; height: 44px; font-size: 16px; border-radius: inherit; }
+.server-rail-icon:hover { border-radius: 16px; }
+.server-rail-icon.active { border-radius: 16px; box-shadow: 0 0 0 2px var(--accent); }
+.server-rail-add {
+  background: var(--surface-2);
+  color: var(--speaking);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.server-rail-add:hover { background: color-mix(in srgb, var(--speaking) 22%, var(--surface-2)); }
+
 /* Persistent servers/channels sidebar for signed-in accounts (see
    lobby.js/rooms.js) — a permanent fixture of the app shell (both the
    lobby and inside a room), not just a lobby-card section, so switching
    channels/servers never means leaving whatever screen you're on. Sticky
-   + its own scroll, same convention as .voice-sidebar. */
+   + its own scroll, same convention as .member-list. */
 #serverSidebar.hidden { display: none; }
 #serverSidebar {
   width: 260px;
@@ -820,7 +865,12 @@ main {
   align-items: flex-start;
   gap: 20px;
 }
-.voice-sidebar {
+/* Discord-style persistent member list — everyone in the room, docked to
+   the right of the video grid instead of hidden behind the 👥 dropdown.
+   Comes after #videos in the DOM so flex order puts it on the right with
+   no extra `order` property needed. Desktop-only; see the breakpoint below
+   for the narrow-viewport fallback (the #participantsPanel dropdown). */
+.member-list {
   width: 220px;
   flex-shrink: 0;
   max-height: calc(100vh - 140px);
@@ -831,15 +881,15 @@ main {
   padding: 14px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
 }
-.voice-sidebar.hidden { display: none; }
-.voice-sidebar-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+
+/* A three-column room (server rail + sidebar + video + member list) needs
+   more room than the old two-column layout did — below this width the
+   member list gives way to the #participantsBtn dropdown instead. */
+@media (max-width: 1000px) {
+  .member-list { display: none; }
 }
-@media (max-width: 760px) {
-  .room-content { flex-direction: column; }
-  .voice-sidebar { width: 100%; max-height: none; }
+@media (min-width: 1001px) {
+  .participants-control { display: none; }
 }
 
 /* Below this width the persistent server/channel sidebar can't sit beside
@@ -856,6 +906,10 @@ main {
 .sidebar-backdrop.hidden { display: none; }
 @media (max-width: 880px) {
   .sidebar-toggle-btn:not(.hidden) { display: inline-flex; align-items: center; justify-content: center; }
+  /* The rail is a desktop shortcut alongside the full sidebar — below this
+     width the sidebar itself becomes the off-canvas drawer (below), so the
+     rail just gives way to the hamburger button instead of duplicating it. */
+  .server-rail { display: none; }
   #serverSidebar:not(.hidden) {
     position: fixed;
     left: 0;

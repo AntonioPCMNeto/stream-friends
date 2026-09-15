@@ -6,8 +6,7 @@ const toggleBtn = document.getElementById('participantsBtn');
 const countEl = document.getElementById('participantsCount');
 const panel = document.getElementById('participantsPanel');
 const listEl = document.getElementById('participantsList');
-const voiceSidebar = document.getElementById('voiceSidebar');
-const voiceSidebarList = document.getElementById('voiceSidebarList');
+const memberListItems = document.getElementById('memberListItems');
 const userBarAvatar = document.getElementById('userBarAvatar');
 const userBarName = document.getElementById('userBarName');
 
@@ -55,10 +54,14 @@ function buildRow(name, purposes, isMe, inVoice, peerId, verified) {
 }
 
 // Re-renders the participant list and count from current state. Called
-// whenever room membership or anyone's sharing status changes.
+// whenever room membership or anyone's sharing status changes. Two DOM
+// targets get the same rows: the dropdown (#participantsPanel, kept for
+// narrow viewports) and the persistent Discord-style #memberList column
+// (see index.html/style.css) — separate nodes since a row can't be in two
+// places in the DOM at once.
 export function refreshParticipants() {
   listEl.innerHTML = '';
-  voiceSidebarList.innerHTML = '';
+  memberListItems.innerHTML = '';
 
   const myPurposes = [
     ...(state.isSharingScreen ? ['screen'] : []),
@@ -67,9 +70,7 @@ export function refreshParticipants() {
 
   if (state.myUsername) {
     listEl.appendChild(buildRow(state.myUsername, myPurposes, true, state.isInVoice, 'local', state.myVerified));
-  }
-  if (state.isInVoice) {
-    voiceSidebarList.appendChild(buildRow(state.myUsername, myPurposes, true, false, 'local', state.myVerified));
+    memberListItems.appendChild(buildRow(state.myUsername, myPurposes, true, state.isInVoice, 'local', state.myVerified));
   }
 
   state.knownPeers.forEach((id) => {
@@ -78,11 +79,10 @@ export function refreshParticipants() {
     const inVoice = state.voicePeers.has(id);
     const verified = state.peerVerified.get(id);
     listEl.appendChild(buildRow(name, purposes, false, inVoice, id, verified));
-    if (inVoice) voiceSidebarList.appendChild(buildRow(name, purposes, false, false, id, verified));
+    memberListItems.appendChild(buildRow(name, purposes, false, inVoice, id, verified));
   });
 
   countEl.textContent = state.knownPeers.size + (state.myUsername ? 1 : 0);
-  voiceSidebar.classList.toggle('hidden', !state.isInVoice);
 
   userBarName.textContent = state.myUsername || '';
   userBarAvatar.innerHTML = '';
@@ -90,8 +90,8 @@ export function refreshParticipants() {
 }
 
 // Toggles the speaking ring on a peer's avatar wherever it's currently
-// rendered (participants panel and/or voice sidebar). Called on every
-// analyser volume sample from voice.js — targeted class toggle, not a
+// rendered (the dropdown and/or the persistent member list). Called on
+// every analyser volume sample from voice.js — targeted class toggle, not a
 // re-render, so it doesn't fight the DOM churn every 150ms.
 export function setSpeaking(peerId, isSpeaking) {
   document.querySelectorAll(`.participant-row[data-peer-id="${peerId}"] .avatar`).forEach((el) => {

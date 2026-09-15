@@ -40,6 +40,7 @@ const authModeToggleBtn = document.getElementById('authModeToggleBtn');
 const authDivider = document.getElementById('authDivider');
 const guestFields = document.getElementById('guestFields');
 const serverSidebar = document.getElementById('serverSidebar');
+const serverRail = document.getElementById('serverRail');
 const authDividerServers = document.getElementById('authDividerServers');
 const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
 const sidebarBackdrop = document.getElementById('sidebarBackdrop');
@@ -185,6 +186,7 @@ function showServerListView() {
   selectedServer = null;
   channelsView.classList.add('hidden');
   serverListView.classList.remove('hidden');
+  updateServerRailActive();
 }
 
 // Below the mobile breakpoint the sidebar is an off-canvas overlay (see
@@ -214,6 +216,7 @@ async function refreshMyServers() {
   const myRooms = await rooms.listMyRooms();
   if (requestId !== serversRequestId) return;
 
+  renderServerRail(myRooms);
   myServersList.innerHTML = '';
 
   if (myRooms.length === 0) {
@@ -268,6 +271,48 @@ async function refreshMyServers() {
   });
 }
 
+// Discord's own leftmost strip — quick server switching alongside the full
+// "Meus Servidores" list (see refreshMyServers, which calls this with the
+// same data it just fetched). Rebuilt whenever the server list refreshes;
+// highlighting alone (no refetch) is handled by updateServerRailActive.
+function renderServerRail(myRooms) {
+  serverRail.innerHTML = '';
+  myRooms.forEach((room) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'server-rail-icon';
+    btn.title = room.name;
+    btn.setAttribute('aria-label', room.name);
+    btn.dataset.roomId = room.id;
+    btn.appendChild(buildAvatar(room.name));
+    btn.addEventListener('click', () => openServerChannels(room));
+    serverRail.appendChild(btn);
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'server-rail-icon server-rail-add';
+  addBtn.title = 'Criar servidor';
+  addBtn.setAttribute('aria-label', 'Criar servidor');
+  addBtn.textContent = '+';
+  addBtn.addEventListener('click', () => {
+    showServerListView();
+    createServerNameInput.focus();
+  });
+  serverRail.appendChild(addBtn);
+
+  updateServerRailActive();
+}
+
+// selectedServer changes on every drill-in/back-out without necessarily
+// refetching the room list, so highlighting is a separate, cheap pass
+// rather than piggybacking on renderServerRail's rebuild.
+function updateServerRailActive() {
+  serverRail.querySelectorAll('.server-rail-icon').forEach((btn) => {
+    btn.classList.toggle('active', selectedServer?.id === btn.dataset.roomId);
+  });
+}
+
 // Drills into one server's channel list, replacing the server list in the
 // same card (see showServerListView for the way back).
 function openServerChannels(room) {
@@ -276,6 +321,7 @@ function openServerChannels(room) {
   createChannelError.textContent = '';
   serverListView.classList.add('hidden');
   channelsView.classList.remove('hidden');
+  updateServerRailActive();
   refreshChannels();
 }
 
@@ -345,6 +391,7 @@ function applyAuthUX() {
   authStatus.classList.toggle('hidden', !signedIn);
   userBarLogoutRow.classList.toggle('hidden', !signedIn);
   serverSidebar.classList.toggle('hidden', !signedIn);
+  serverRail.classList.toggle('hidden', !signedIn);
   authDividerServers.classList.toggle('hidden', !signedIn);
   sidebarToggleBtn.classList.toggle('hidden', !signedIn);
   document.body.classList.toggle('has-sidebar', signedIn);
@@ -394,6 +441,17 @@ let isSwitchingChannel = false;
 // in one (see the sidebar's channel rows). displayLabel lets a channel
 // switch show "# Geral" in the room bar instead of the raw room id.
 function joinRoom(roomId, displayLabel = roomId) {
+  // enterRoom() normally sets these first, but a signed-in user can also
+  // land here straight from a sidebar channel row without ever going
+  // through the lobby form (the sidebar is visible there too) — derive them
+  // the same way enterRoom() does rather than silently joining with an
+  // empty local username (self only renders correctly server-side then;
+  // locally you'd show as "0 participants" and a blank user bar).
+  if (!state.myUsername) {
+    state.myUsername = identity?.username || usernameInput.value.trim();
+    state.myVerified = Boolean(identity);
+  }
+
   const isSwitch = state.hasEntered;
   if (isSwitch) teardownRoomState();
 
