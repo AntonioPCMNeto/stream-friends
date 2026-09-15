@@ -74,18 +74,6 @@ main {
   padding: 0 20px 60px;
 }
 
-/* .server-rail + #serverSidebar only eat space on the LEFT (60px+16px
-   rail, 260px+16px sidebar, see their own rules), so centering .card/
-   .room-bar via plain margin:auto inside main centers them in the
-   narrower remaining strip — visually right-shifted from the page's true
-   center. Mirroring that same 352px as extra right padding here (only
-   once they're actually in flow — signed in, and above the breakpoint
-   where they become an off-canvas overlay instead) cancels the asymmetry
-   back out. */
-@media (min-width: 881px) {
-  body.has-sidebar main { padding-right: calc(20px + 352px); }
-}
-
 .btn {
   height: 38px;
   padding: 0 18px;
@@ -853,11 +841,6 @@ main {
   flex-shrink: 0;
 }
 
-/* A layout column next to .video-grid, not a floating overlay — a fixed
-   position independent of the centered, variable-width video grid used to
-   let it drift on top of the first tile on anything narrower than ~1400px.
-   Stacks above the grid instead of beside it below the .room-content
-   breakpoint. */
 .room-content {
   max-width: 1340px;
   margin: 24px auto 0;
@@ -865,30 +848,43 @@ main {
   align-items: flex-start;
   gap: 20px;
 }
+
 /* Discord-style persistent member list — everyone in the room, docked to
-   the right of the video grid instead of hidden behind the 👥 dropdown.
-   Comes after #videos in the DOM so flex order puts it on the right with
-   no extra `order` property needed. Desktop-only; see the breakpoint below
-   for the narrow-viewport fallback (the #participantsPanel dropdown). */
+   the right of the whole app shell (see index.html: a sibling of main and
+   #serverSidebar, not nested in .room-content) instead of hidden behind
+   the 👥 dropdown. A true flex column reserving its own width, exactly
+   mirroring #serverSidebar on the other side — same sticky/scroll/margin
+   pattern, mirrored — is what keeps the room-bar/video area actually
+   centered between the two instead of drifting toward one side. */
+.member-list.hidden { display: none; }
 .member-list {
-  width: 220px;
+  width: 260px;
   flex-shrink: 0;
-  max-height: calc(100vh - 140px);
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
   overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  margin: 16px 16px 16px 0;
+  padding: 20px 16px;
 }
+/* .participants-list's own max-height/scroll (below) is sized for the
+   dropdown's limited height — here the outer .member-list already scrolls
+   as a whole, sidebar-style, so let the list grow with it instead of
+   nesting a second scroll region. */
+.member-list .participants-list { max-height: none; overflow-y: visible; }
 
-/* A three-column room (server rail + sidebar + video + member list) needs
-   more room than the old two-column layout did — below this width the
-   member list gives way to the #participantsBtn dropdown instead. */
-@media (max-width: 1000px) {
+/* A four-column room (server rail + sidebar + video + member list) needs
+   more room than a two-column layout — below this width the member list
+   gives way to the #participantsBtn dropdown instead, same off-canvas-vs-
+   docked trade #serverSidebar already makes at its own (narrower)
+   breakpoint, since the channel list matters more than the member list. */
+@media (max-width: 1100px) {
   .member-list { display: none; }
 }
-@media (min-width: 1001px) {
+@media (min-width: 1101px) {
   .participants-control { display: none; }
 }
 

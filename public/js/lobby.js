@@ -11,6 +11,7 @@ import { buildAvatar } from './identity.js';
 
 const lobby = document.getElementById('lobby');
 const appScreen = document.getElementById('appScreen');
+const memberList = document.getElementById('memberList');
 const usernameInput = document.getElementById('usernameInput');
 const roomCodeInput = document.getElementById('roomCodeInput');
 const lobbyError = document.getElementById('lobbyError');
@@ -476,6 +477,7 @@ function joinRoom(roomId, displayLabel = roomId) {
 
   lobby.style.display = 'none';
   appScreen.style.display = '';
+  memberList.classList.remove('hidden');
 
   if (isSwitch) {
     // server.js's join-room handler never removes a socket from its
@@ -527,6 +529,7 @@ function leaveRoom() {
   window.history.replaceState({}, '', url);
 
   appScreen.style.display = 'none';
+  memberList.classList.add('hidden');
   lobby.style.display = '';
   lobbyError.textContent = '';
   roomCodeInput.value = '';
