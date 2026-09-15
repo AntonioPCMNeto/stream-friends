@@ -82,6 +82,8 @@ const joinBtn = document.getElementById('voiceJoinBtn');
 const activeControls = document.getElementById('voiceActiveControls');
 const connectedBar = document.getElementById('voiceConnectedBar');
 const micSelect = document.getElementById('voiceMicSelect');
+const speakerRow = document.getElementById('userBarSpeakerRow');
+const speakerSelect = document.getElementById('voiceSpeakerSelect');
 const muteBtn = document.getElementById('voiceMuteBtn');
 const deafenBtn = document.getElementById('voiceDeafenBtn');
 const leaveBtn = document.getElementById('voiceLeaveBtn');
@@ -93,10 +95,29 @@ const settingsPopover = document.getElementById('userBarPopover');
 // leave you however you were before, not always unmuted.
 let mutedBeforeDeafen = false;
 
-// 'default' = whatever getUserMedia hands back unconstrained (the OS/browser
-// default input) — not a real deviceId, just this module's own sentinel.
-let currentMicDeviceId = 'default';
+// Remembered across sessions (Discord-style "default input/output device"),
+// not just for the lifetime of one voice call — see loadDevicePref below.
+const MIC_PREF_KEY = 'scrimaAi.micDeviceId';
+const SPEAKER_PREF_KEY = 'scrimaAi.speakerDeviceId';
+
+// 'default' = whatever getUserMedia/the sink hands back unconstrained (the
+// OS/browser default) — not a real deviceId, just this module's own sentinel.
+function loadDevicePref(key) {
+  try { return localStorage.getItem(key) || 'default'; } catch { return 'default'; }
+}
+function saveDevicePref(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* best-effort only */ }
+}
+
+let currentMicDeviceId = loadDevicePref(MIC_PREF_KEY);
+let currentSpeakerDeviceId = loadDevicePref(SPEAKER_PREF_KEY);
 let micSwitchInFlight = false;
+
+// setSinkId (choosing which speaker/headset voice plays out of) is
+// Chrome/Edge-only — Firefox and Safari have no equivalent API. The row is
+// hidden entirely rather than shown-but-broken when it's not supported.
+const SPEAKER_SELECTION_SUPPORTED = typeof HTMLMediaElement !== 'undefined'
+  && typeof HTMLMediaElement.prototype.setSinkId === 'function';
 
 function setVoiceUI() {
   const inVoice = state.isInVoice;
@@ -120,8 +141,6 @@ function setVoiceUI() {
   else if (state.isDeafened) statusEl.textContent = '🔇 Ensurdecido';
   else if (state.isMuted) statusEl.textContent = '🎤 Silenciado';
   else statusEl.textContent = '🎧 Em áudio';
-
-  if (!inVoice) closeSettingsPopover();
 }
 
 function closeSettingsPopover() {
@@ -129,12 +148,15 @@ function closeSettingsPopover() {
   settingsBtn.setAttribute('aria-expanded', 'false');
 }
 
+// Not gated on being in voice — it's also where you pick your default
+// devices ahead of joining, and sign out (see lobby.js's wiring of
+// #userBarLogoutBtn).
 function toggleSettingsPopover() {
-  if (!state.isInVoice) {
-    showToast('Entre no áudio para trocar o microfone.', 'error');
-    return;
-  }
   const opening = settingsPopover.classList.contains('hidden');
+  if (opening) {
+    populateMicSelect();
+    populateSpeakerSelect();
+  }
   settingsPopover.classList.toggle('hidden', !opening);
   settingsBtn.setAttribute('aria-expanded', String(opening));
 }
@@ -148,6 +170,11 @@ function applyMicEnabled() {
 
 function applyDeafened() {
   audioSinks.forEach((audio) => { audio.muted = state.isDeafened; });
+}
+
+function applySpeakerSink(audio) {
+  if (!SPEAKER_SELECTION_SUPPORTED) return;
+  audio.setSinkId(currentSpeakerDeviceId).catch(() => {});
 }
 
 function peerLabel(peerId) {
@@ -175,6 +202,7 @@ function createVoicePc(peerId) {
       audio = new Audio();
       audio.autoplay = true;
       audioSinks.set(peerId, audio);
+      applySpeakerSink(audio);
     }
     audio.srcObject = event.streams[0] || new MediaStream([event.track]);
     audio.muted = state.isDeafened;
@@ -234,10 +262,10 @@ function captureMic(deviceId) {
   return navigator.mediaDevices.getUserMedia({ audio });
 }
 
-// Device labels are blank until the mic permission has been granted at least
-// once — fine here, since this only runs after joinVoice's own getUserMedia
-// already prompted. Re-run on 'devicechange' (plug/unplug mid-call) and right
-// after joining.
+// Device labels are blank until mic permission has been granted at least
+// once in this origin — the list still populates (unlabeled) before that,
+// e.g. on initVoice's first call, ahead of ever joining. Re-run on
+// 'devicechange' and right after joining, once permission is certainly granted.
 async function populateMicSelect() {
   let devices = [];
   try {
@@ -253,6 +281,28 @@ async function populateMicSelect() {
 
   const validValues = Array.from(micSelect.options).map((o) => o.value);
   micSelect.value = validValues.includes(currentMicDeviceId) ? currentMicDeviceId : 'default';
+}
+
+// Same idea as populateMicSelect, for 'audiooutput' devices — a no-op (empty
+// select, left hidden) when the browser can't select an output at all.
+async function populateSpeakerSelect() {
+  if (!SPEAKER_SELECTION_SUPPORTED) return;
+  speakerRow.classList.remove('hidden');
+
+  let devices = [];
+  try {
+    devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput');
+  } catch { /* leave the list at just "Saída padrão" */ }
+
+  speakerSelect.innerHTML = '';
+  speakerSelect.appendChild(new Option('Saída padrão', 'default'));
+  devices.forEach((d) => {
+    if (!d.deviceId || d.deviceId === 'default') return;
+    speakerSelect.appendChild(new Option(d.label || `Saída ${d.deviceId.slice(0, 6)}`, d.deviceId));
+  });
+
+  const validValues = Array.from(speakerSelect.options).map((o) => o.value);
+  speakerSelect.value = validValues.includes(currentSpeakerDeviceId) ? currentSpeakerDeviceId : 'default';
 }
 
 // Hot-swaps the outgoing mic track on every live voice connection —
@@ -285,6 +335,22 @@ async function switchMicDevice(deviceId) {
   }
 }
 
+// Bound to the select itself — persists the choice as the new default
+// (Discord-style) whether or not a call is live, and additionally hot-swaps
+// the active track when it is.
+function handleMicSelectChange() {
+  const deviceId = micSelect.value;
+  saveDevicePref(MIC_PREF_KEY, deviceId);
+  if (state.isInVoice) switchMicDevice(deviceId);
+  else currentMicDeviceId = deviceId;
+}
+
+function handleSpeakerSelectChange() {
+  currentSpeakerDeviceId = speakerSelect.value;
+  saveDevicePref(SPEAKER_PREF_KEY, currentSpeakerDeviceId);
+  audioSinks.forEach((audio) => applySpeakerSink(audio));
+}
+
 async function joinVoice() {
   if (state.isInVoice) return;
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -294,17 +360,31 @@ async function joinVoice() {
 
   let stream;
   try {
-    currentMicDeviceId = 'default';
-    stream = await captureMic('default');
+    stream = await captureMic(currentMicDeviceId);
   } catch (err) {
-    console.error('Failed to capture microphone:', err);
-    showToast(
-      err.name === 'NotAllowedError'
-        ? 'Permissão de microfone negada.'
-        : 'Não foi possível acessar o microfone.',
-      'error'
-    );
-    return;
+    // The saved device (e.g. unplugged since last time) may simply no longer
+    // exist — retry against whatever the OS considers default before giving
+    // up, same as a fresh install would.
+    if (currentMicDeviceId !== 'default') {
+      try {
+        stream = await captureMic('default');
+        currentMicDeviceId = 'default';
+        saveDevicePref(MIC_PREF_KEY, 'default');
+      } catch (err2) {
+        console.error('Failed to capture microphone:', err2);
+        showToast('Não foi possível acessar o microfone.', 'error');
+        return;
+      }
+    } else {
+      console.error('Failed to capture microphone:', err);
+      showToast(
+        err.name === 'NotAllowedError'
+          ? 'Permissão de microfone negada.'
+          : 'Não foi possível acessar o microfone.',
+        'error'
+      );
+      return;
+    }
   }
 
   state.micStream = stream;
@@ -314,6 +394,7 @@ async function joinVoice() {
   applyMicEnabled();
   attachAnalyser('local', stream);
   await populateMicSelect();
+  populateSpeakerSelect();
   setVoiceUI();
   refreshParticipants();
   showToast('Você entrou no áudio.');
@@ -330,7 +411,6 @@ function leaveVoice({ silent = false } = {}) {
   state.isInVoice = false;
   state.isMuted = false;
   state.isDeafened = false;
-  currentMicDeviceId = 'default';
   teardownAllPeers();
   setVoiceUI();
   refreshParticipants();
@@ -366,21 +446,22 @@ function toggleDeafen() {
 // Called on leaving the room (lobby.js) — full silent teardown.
 export function resetVoice() {
   leaveVoice({ silent: true });
+  closeSettingsPopover();
 }
 
 export function initVoice(theSocket) {
   socket = theSocket;
   setVoiceUI();
+  populateMicSelect();
+  populateSpeakerSelect();
 
   joinBtn.addEventListener('click', joinVoice);
   leaveBtn.addEventListener('click', () => leaveVoice());
   muteBtn.addEventListener('click', toggleMute);
   deafenBtn.addEventListener('click', toggleDeafen);
   settingsBtn.addEventListener('click', toggleSettingsPopover);
-  micSelect.addEventListener('change', () => {
-    switchMicDevice(micSelect.value);
-    closeSettingsPopover();
-  });
+  micSelect.addEventListener('change', handleMicSelectChange);
+  speakerSelect.addEventListener('change', handleSpeakerSelectChange);
 
   document.addEventListener('click', (e) => {
     if (!settingsPopover.classList.contains('hidden') && !e.target.closest('.user-bar-controls') && !e.target.closest('.user-bar-popover')) {
@@ -391,10 +472,11 @@ export function initVoice(theSocket) {
     if (e.key === 'Escape') closeSettingsPopover();
   });
 
-  // Mic plugged/unplugged mid-call — refresh the dropdown's options (not the
-  // active device; switchMicDevice only runs on an explicit user pick).
+  // A device plugged/unplugged — refresh both dropdowns' options (not the
+  // active device; switching only ever happens on an explicit user pick).
   navigator.mediaDevices?.addEventListener?.('devicechange', () => {
-    if (state.isInVoice) populateMicSelect();
+    populateMicSelect();
+    populateSpeakerSelect();
   });
 
   socket.on('existing-peers', (peers) => {

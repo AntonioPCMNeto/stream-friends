@@ -25,6 +25,8 @@ const authStatus = document.getElementById('authStatus');
 const authAvatar = document.getElementById('authAvatar');
 const authName = document.getElementById('authName');
 const signOutBtn = document.getElementById('signOutBtn');
+const userBarLogoutRow = document.getElementById('userBarLogoutRow');
+const userBarLogoutBtn = document.getElementById('userBarLogoutBtn');
 const authForm = document.getElementById('authForm');
 const authUsernameField = document.getElementById('authUsernameField');
 const authEmail = document.getElementById('authEmail');
@@ -326,9 +328,22 @@ async function refreshChannels() {
 // free-text nick field gets out of the way entirely and the room-scoped
 // "who are you" question is already answered. Signed out ⇒ the guest form
 // (unchanged from before accounts existed).
+// Shared by the lobby card's sign-out button and the in-room settings
+// panel's (see index.html's #userBarLogoutBtn, inside voice.js's popover) —
+// the latter is reachable mid-room, unlike the lobby-only original, so
+// signing out there also leaves the room: the room-scoped username you're
+// connected under came from this account and shouldn't silently outlive it.
+async function handleSignOut() {
+  await auth.signOut();
+  identity = null;
+  if (state.hasEntered) leaveRoom();
+  else applyAuthUX();
+}
+
 function applyAuthUX() {
   const signedIn = Boolean(identity);
   authStatus.classList.toggle('hidden', !signedIn);
+  userBarLogoutRow.classList.toggle('hidden', !signedIn);
   serverSidebar.classList.toggle('hidden', !signedIn);
   authDividerServers.classList.toggle('hidden', !signedIn);
   sidebarToggleBtn.classList.toggle('hidden', !signedIn);
@@ -522,11 +537,8 @@ export async function initLobby(theSocket) {
     authNotice.classList.remove('hidden');
   });
 
-  signOutBtn.addEventListener('click', async () => {
-    await auth.signOut();
-    identity = null;
-    applyAuthUX();
-  });
+  signOutBtn.addEventListener('click', handleSignOut);
+  userBarLogoutBtn.addEventListener('click', handleSignOut);
 
   createServerBtn.addEventListener('click', async () => {
     if (createServerBtn.disabled) return; // guards a double-click into two real rooms

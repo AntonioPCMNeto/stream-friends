@@ -575,6 +575,15 @@ main {
   background: var(--surface-2);
   border-color: var(--border);
 }
+#userBarSpeakerRow { margin-top: 14px; }
+#userBarSpeakerRow.hidden { display: none; }
+.user-bar-logout-row {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.user-bar-logout-row.hidden { display: none; }
+.user-bar-logout-row .btn-link { margin: 0; color: var(--danger); }
 
 @media (max-width: 420px) {
   .user-bar-wrap { left: 8px; bottom: 8px; }

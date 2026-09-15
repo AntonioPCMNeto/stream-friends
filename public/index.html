@@ -192,6 +192,15 @@
           <div id="userBarPopover" class="user-bar-popover hidden">
             <div class="field-label">Microfone</div>
             <select id="voiceMicSelect" class="voice-mic-select" aria-label="Microfone"></select>
+
+            <div id="userBarSpeakerRow" class="hidden">
+              <div class="field-label">Saída de áudio</div>
+              <select id="voiceSpeakerSelect" class="voice-mic-select" aria-label="Saída de áudio"></select>
+            </div>
+
+            <div id="userBarLogoutRow" class="user-bar-logout-row hidden">
+              <button id="userBarLogoutBtn" type="button" class="btn-link">Sair da conta</button>
+            </div>
           </div>
           <span id="userBarAvatar" class="user-bar-avatar"></span>
           <div class="user-bar-info">
@@ -204,7 +213,7 @@
               <button id="voiceMuteBtn" class="btn btn-ghost btn-icon" aria-pressed="false" title="Silenciar microfone">🎤</button>
               <button id="voiceDeafenBtn" class="btn btn-ghost btn-icon" aria-pressed="false" title="Ensurdecer">🎧</button>
             </div>
-            <button id="userBarSettingsBtn" class="btn btn-ghost btn-icon" title="Configurações de áudio" aria-label="Configurações de áudio" aria-expanded="false" aria-haspopup="true">⚙️</button>
+            <button id="userBarSettingsBtn" class="btn btn-ghost btn-icon" title="Configurações" aria-label="Configurações" aria-expanded="false" aria-haspopup="true">⚙️</button>
           </div>
         </div>
       </div>
