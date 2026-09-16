@@ -386,6 +386,27 @@ function buildChannelHint(text) {
   return hint;
 }
 
+// Any member can delete any channel (see rooms.js's deleteChannel) — shown
+// as a hover-reveal ✕, same "don't clutter every row all the time" pattern
+// as the chat gutter's hover timestamp. stopPropagation so it doesn't also
+// trigger the row's own "enter this channel" click.
+function appendChannelDeleteButton(row, channel) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'channel-delete-btn';
+  btn.textContent = '✕';
+  btn.title = `Excluir #${channel.name}`;
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!confirm(`Excluir o canal "${channel.name}"? Essa ação não pode ser desfeita.`)) return;
+    btn.disabled = true;
+    const { error } = await rooms.deleteChannel(channel.id);
+    if (error) { showToast(error, 'error'); btn.disabled = false; return; }
+    refreshChannels();
+  });
+  row.appendChild(btn);
+}
+
 function buildTextChannelRow(channel) {
   const row = document.createElement('div');
   row.className = 'my-server-row';
@@ -408,6 +429,7 @@ function buildTextChannelRow(channel) {
   row.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activateRow(); }
   });
+  appendChannelDeleteButton(row, channel);
   return row;
 }
 
@@ -444,6 +466,7 @@ function buildVoiceChannelRow(channel) {
   row.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activateRow(); }
   });
+  appendChannelDeleteButton(row, channel);
   wrap.appendChild(row);
 
   const occupants = document.createElement('div');

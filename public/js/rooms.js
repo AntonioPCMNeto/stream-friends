@@ -57,6 +57,16 @@ export async function joinRoomByCode(code) {
   return { room: data };
 }
 
+// Any member can delete any channel — same permission model as
+// createChannel/set_channel_type (membership only, no owner check).
+export async function deleteChannel(channelId) {
+  const supabase = getClient();
+  if (!supabase) return { error: 'Contas não estão configuradas neste servidor.' };
+  const { error } = await supabase.rpc('delete_channel', { target_channel_id: channelId });
+  if (error) return { error: error.message };
+  return {};
+}
+
 // Removes your own membership row, dropping the server off "Meus
 // Servidores". Doesn't touch the room itself or other members — same
 // RPC-only convention as createRoom/tryJoinByInvite, since RLS only grants

@@ -322,6 +322,28 @@ main {
 .my-server-row.active .channel-hash { color: var(--accent); }
 .channel-voice-icon { flex-shrink: 0; font-size: 13px; }
 
+.channel-delete-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.my-server-row:hover .channel-delete-btn,
+.channel-delete-btn:focus-visible {
+  opacity: 1;
+}
+.channel-delete-btn:hover { background: color-mix(in srgb, var(--danger) 22%, transparent); color: var(--danger); }
+.channel-delete-btn:disabled { opacity: 0.5; cursor: default; }
+
 /* Discord's own "who's in this voice channel" — nested under each voice
    channel row, live-updated from the server's 'voice-occupancy' broadcast
    (see lobby.js/server.js) rather than only showing once you've joined. */
