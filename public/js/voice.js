@@ -27,68 +27,106 @@ let audioCtx = null;
 const analysers = new Map(); // id -> { source, analyser, data, speaking }
 let monitorHandle = null;
 
-// Local-only noise gate: the browser's own noiseSuppression (see
-// captureMic) handles steady-state hiss/hum fine but does nothing for
-// background bleed while you're simply not talking — this silences the
-// outgoing audio between words instead, using the exact same RMS signal
-// already driving the speaking-ring indicator above. gateOpenUntil is a
-// timestamp, not a bool, so "stay open" is just "now < gateOpenUntil" —
-// every loud tick while talking pushes it forward, and it naturally lapses
-// once you've been quiet for GATE_HANGOVER_MS.
-//
-// Deliberately NOT implemented as track.enabled = false on the real mic
-// track, unlike mute/deafen (see applyMicEnabled) — that would silence the
-// 'local' analyser too (see the comment above), which is exactly the signal
-// this gate needs to detect the next time you speak. Disabling it would
-// make the gate un-reopenable after the first silence, forever. Instead the
-// gate swaps which track is actually attached to each RTCRtpSender: the
-// real (always-enabled, always-analysable) track when open, a permanently
-// silent dummy track when closed. Mute/deafen stay independent and still
-// use track.enabled on the real track — orthogonal to this, and correct
-// either way since a disabled real track is silent whichever track object
-// happens to be attached to the sender.
-const GATE_HANGOVER_MS = 300;
-let gateOpen = false;
-let gateOpenUntil = 0;
-let silentTrack = null;
-
-function getSilentTrack() {
-  if (!silentTrack) silentTrack = ensureAudioCtx().createMediaStreamDestination().stream.getAudioTracks()[0];
-  return silentTrack;
+function ensureAudioCtx() {
+  // RNNoise (below) is built assuming 48kHz frames — most browsers default
+  // there anyway, but this makes it explicit instead of hoping the system
+  // default matches. Web Audio resamples from the actual hardware rate as
+  // needed, so this doesn't require the audio device itself to run at 48kHz.
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+  audioCtx.resume().catch(() => {});
+  return audioCtx;
 }
 
-// Re-points every active voice peer connection's outgoing audio at whichever
-// track the current gate state calls for. Also what switchMicDevice calls
-// after capturing a new device, so a mid-call mic swap picks up the gate's
-// current state instead of always going through as "real track" regardless.
-function applyGateToSenders() {
-  const track = gateOpen ? state.micStream?.getAudioTracks()[0] : getSilentTrack();
-  if (!track) return;
-  voicePcs.forEach((pc) => {
-    const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
-    sender?.replaceTrack(track).catch(() => {});
-  });
+// RNNoise (ML-based, real spectral denoising — suppresses noise mixed INTO
+// your voice while you're talking, not just between words) via
+// @sapphi-red/web-noise-suppressor, vendored under /vendor since this app
+// has no bundler to pull an npm package through. Replaces an earlier
+// track-enabled/disabled "noise gate" approach: that only muted between
+// words and, at any hangover short enough to not be annoying, ended up
+// clipping the start of words after a natural speech pause — a structural
+// problem with any hard gate, not a tuning issue. Continuous suppression
+// doesn't have that failure mode at all.
+const RNNOISE_BASE = '/vendor/web-noise-suppressor';
+let rnnoiseModulePromise = null;
+let rnnoiseWasmBinaryPromise = null;
+let rnnoiseWorkletModuleLoaded = false;
+
+function loadRnnoiseModule() {
+  if (!rnnoiseModulePromise) rnnoiseModulePromise = import(`${RNNOISE_BASE}/index.js`);
+  return rnnoiseModulePromise;
 }
 
-function updateNoiseGate(isSpeaking, now) {
-  if (isSpeaking) gateOpenUntil = now + GATE_HANGOVER_MS;
-  const shouldBeOpen = now < gateOpenUntil;
-  if (shouldBeOpen !== gateOpen) {
-    gateOpen = shouldBeOpen;
-    applyGateToSenders();
+// The processing graph for the CURRENT raw mic capture — rebuilt on every
+// join/leave/device switch, since it's wired to one specific raw stream.
+let noiseSuppressionGraph = null; // { rawStream, sourceNode, workletNode, destNode }
+
+// Inserts RNNoise between the raw captured mic and everything else (the
+// speaking-ring/analyser, and whatever's sent to peers) — the processed
+// stream becomes the new state.micStream, so the rest of this module never
+// needs to know suppression is happening. Falls back to the raw stream
+// untouched (still has the browser's own noiseSuppression from captureMic)
+// if AudioWorklet or the WASM module is unavailable, rather than failing
+// voice chat entirely over a denoiser that couldn't load.
+async function applyNoiseSuppression(rawStream) {
+  try {
+    const ctx = ensureAudioCtx();
+    const { RnnoiseWorkletNode, loadRnnoise } = await loadRnnoiseModule();
+
+    if (!rnnoiseWorkletModuleLoaded) {
+      await ctx.audioWorklet.addModule(`${RNNOISE_BASE}/rnnoiseWorklet.js`);
+      rnnoiseWorkletModuleLoaded = true;
+    }
+    if (!rnnoiseWasmBinaryPromise) {
+      rnnoiseWasmBinaryPromise = loadRnnoise({
+        url: `${RNNOISE_BASE}/rnnoise.wasm`,
+        simdUrl: `${RNNOISE_BASE}/rnnoise_simd.wasm`,
+      });
+    }
+    const wasmBinary = await rnnoiseWasmBinaryPromise;
+
+    const sourceNode = ctx.createMediaStreamSource(rawStream);
+    const workletNode = new RnnoiseWorkletNode(ctx, { maxChannels: 1, wasmBinary });
+    const destNode = ctx.createMediaStreamDestination();
+    sourceNode.connect(workletNode).connect(destNode);
+
+    noiseSuppressionGraph = { rawStream, sourceNode, workletNode, destNode };
+    return destNode.stream;
+  } catch (err) {
+    console.error('RNNoise unavailable, falling back to unprocessed mic:', err);
+    // No graph actually got installed for this stream — make sure a stale
+    // reference from a previous (successful) capture doesn't linger and get
+    // torn down as if it still belonged to what's now state.micStream.
+    noiseSuppressionGraph = null;
+    return rawStream;
   }
 }
 
-function ensureAudioCtx() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  audioCtx.resume().catch(() => {});
-  return audioCtx;
+function teardownGraph(graph) {
+  if (!graph) return;
+  graph.sourceNode.disconnect();
+  graph.workletNode.disconnect();
+  graph.workletNode.destroy();
+  graph.rawStream.getTracks().forEach((t) => t.stop());
+}
+
+function teardownNoiseSuppression() {
+  teardownGraph(noiseSuppressionGraph);
+  noiseSuppressionGraph = null;
+}
+
+// captureMic() + applyNoiseSuppression() in one step — what joinVoice and
+// switchMicDevice actually call. Keeps the raw getUserMedia call separate
+// from the graph-building since the fallback-to-'default'-device retry in
+// joinVoice needs the raw capture to potentially fail and be retried before
+// any processing graph exists.
+async function captureProcessedMic(deviceId) {
+  const rawStream = await captureMic(deviceId);
+  return applyNoiseSuppression(rawStream);
 }
 
 function startMonitorLoop() {
   if (monitorHandle) return;
   monitorHandle = setInterval(() => {
-    const now = Date.now();
     analysers.forEach((entry, id) => {
       entry.analyser.getByteTimeDomainData(entry.data);
       let sumSquares = 0;
@@ -101,7 +139,6 @@ function startMonitorLoop() {
         entry.speaking = isSpeaking;
         setSpeaking(id, isSpeaking);
       }
-      if (id === 'local') updateNoiseGate(isSpeaking, now);
     });
   }, SPEAKING_POLL_MS);
 }
@@ -156,10 +193,11 @@ export function debugVoiceState() {
     micTrackReadyState: state.micStream?.getAudioTracks()[0]?.readyState,
     micTrackEnabled: state.micStream?.getAudioTracks()[0]?.enabled,
     audioCtxState: audioCtx?.state,
+    audioCtxSampleRate: audioCtx?.sampleRate,
     hasLocalAnalyser: Boolean(local),
     currentLocalRms: rms,
     speakingThreshold: SPEAKING_THRESHOLD,
-    gateOpen,
+    rnnoiseActive: Boolean(noiseSuppressionGraph),
   };
 }
 
@@ -305,10 +343,7 @@ function createVoicePc(peerId) {
 function addMicTrack(pc) {
   if (!state.micStream) return;
   if (pc.getSenders().some((s) => s.track && s.track.kind === 'audio')) return;
-  // Start a brand-new connection already respecting the current gate state
-  // (e.g. joining without having spoken yet) rather than briefly sending the
-  // real track until the next monitor tick corrects it.
-  pc.addTrack(gateOpen ? state.micStream.getAudioTracks()[0] : getSilentTrack());
+  pc.addTrack(state.micStream.getAudioTracks()[0]);
 }
 
 // Glare-free: of any two peers, only the one with the lexicographically
@@ -401,10 +436,11 @@ async function populateSpeakerSelect() {
 async function switchMicDevice(deviceId) {
   if (!state.isInVoice || micSwitchInFlight) return;
   micSwitchInFlight = true;
-  const previous = state.micStream;
+  const previousStream = state.micStream;
+  const previousGraph = noiseSuppressionGraph; // captureProcessedMic overwrites the module-level one below on success
 
   try {
-    const stream = await captureMic(deviceId);
+    const stream = await captureProcessedMic(deviceId);
     const track = stream.getAudioTracks()[0];
     track.enabled = !state.isMuted && !state.isDeafened;
 
@@ -412,8 +448,12 @@ async function switchMicDevice(deviceId) {
     currentMicDeviceId = deviceId;
     detachAnalyser('local');
     attachAnalyser('local', stream);
-    applyGateToSenders(); // picks up the new device's track if the gate's open, or keeps it silenced if not
-    previous?.getTracks().forEach((t) => t.stop());
+    voicePcs.forEach((pc) => {
+      const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
+      sender?.replaceTrack(track).catch(() => {});
+    });
+    teardownGraph(previousGraph);
+    previousStream?.getTracks().forEach((t) => t.stop());
   } catch (err) {
     console.error('Failed to switch microphone:', err);
     showToast('Não foi possível trocar o microfone.', 'error');
@@ -477,6 +517,8 @@ export async function joinVoice() {
     }
   }
 
+  stream = await applyNoiseSuppression(stream); // the raw capture above, now denoised (or unchanged, if unavailable)
+
   state.micStream = stream;
   state.isInVoice = true;
   state.isMuted = false;
@@ -498,8 +540,7 @@ function leaveVoice({ silent = false } = {}) {
   state.micStream?.getTracks().forEach((t) => t.stop());
   state.micStream = null;
   detachAnalyser('local');
-  gateOpen = false;
-  gateOpenUntil = 0;
+  teardownNoiseSuppression();
   state.isInVoice = false;
   state.isMuted = false;
   state.isDeafened = false;
