@@ -3,7 +3,7 @@ import { stopSharing, stopWebcam, initSegmented } from './share.js';
 import { closeAllPeerConnections } from './peers.js';
 import { refreshParticipants } from './participants.js';
 import { showToast } from './toast.js';
-import { clearChat, setChannelLabel } from './chat.js';
+import { clearChat, setViewingChannel, openPanelIfClosed } from './chat.js';
 import { resetVoice, joinVoice } from './voice.js';
 import * as auth from './auth.js';
 import * as rooms from './rooms.js';
@@ -214,8 +214,45 @@ function applyAuthMode() {
 // to state.roomId (which only gets set once a channel is actually entered).
 let selectedServer = null;
 
+// Which channel's chat the floating panel is currently showing/sending to.
+// Normally the same as state.roomId (the channel you actually entered), but
+// can point at a different text channel while staying connected elsewhere
+// — see peekChannelChat, used specifically so being in a voice channel
+// doesn't mean losing that call just to glance at a text channel.
+let viewingChannelId = null;
+
+// Toggles which channel rows read as "active" without re-fetching the list
+// — peekChannelChat's job, since it doesn't touch selectedServer/channels
+// and a full refreshChannels() would be a pointless round trip just to move
+// a highlight. Voice rows still track state.roomId (the channel you're
+// actually connected to); only text rows follow the peekable viewingChannelId.
+function updateChannelActiveHighlight() {
+  textChannelsList.querySelectorAll('.my-server-row').forEach((row) => {
+    row.classList.toggle('active', row.dataset.channelId === viewingChannelId);
+  });
+  voiceChannelsList.querySelectorAll('.my-server-row').forEach((row) => {
+    row.classList.toggle('active', state.hasEntered && row.dataset.channelId === state.roomId);
+  });
+}
+
+// Clicking a text channel while connected to voice elsewhere (screen share,
+// webcam, the room-bar, the participant list — none of that is tied to
+// whichever channel's chat you're peeking at) shouldn't cost you that call.
+// Only text channels support this: a voice channel row always means "join
+// this call", since you can't meaningfully be in two at once.
+function peekChannelChat(channel) {
+  if (viewingChannelId === channel.id) { closeSidebarOnMobile(); return; }
+  viewingChannelId = channel.id;
+  socket.emit('view-channel', { channelId: channel.id });
+  setViewingChannel(channel.id, `#${channel.name}`);
+  openPanelIfClosed();
+  updateChannelActiveHighlight();
+  closeSidebarOnMobile();
+}
+
 function showNoServerView() {
   selectedServer = null;
+  viewingChannelId = null; // no channel rows are even rendered in this state — just keeping the highlight state honest
   channelsView.classList.add('hidden');
   noServerView.classList.remove('hidden');
   updateServerRailActive();
@@ -410,7 +447,8 @@ function appendChannelDeleteButton(row, channel) {
 function buildTextChannelRow(channel) {
   const row = document.createElement('div');
   row.className = 'my-server-row';
-  row.classList.toggle('active', state.hasEntered && channel.id === state.roomId);
+  row.dataset.channelId = channel.id;
+  row.classList.toggle('active', channel.id === viewingChannelId);
   row.tabIndex = 0;
   row.setAttribute('role', 'button');
   const hash = document.createElement('span');
@@ -421,9 +459,15 @@ function buildTextChannelRow(channel) {
   name.className = 'row-label';
   name.textContent = channel.name;
   row.appendChild(name);
+  // In voice elsewhere -> just peek at this channel's chat, don't drop the
+  // call. Not in voice -> same full switch as any other channel.
   const activateRow = () => {
-    joinRoom(channel.id, `#${channel.name}`);
-    closeSidebarOnMobile();
+    if (state.isInVoice) {
+      peekChannelChat(channel);
+    } else {
+      joinRoom(channel.id, `#${channel.name}`);
+      closeSidebarOnMobile();
+    }
   };
   row.addEventListener('click', activateRow);
   row.addEventListener('keydown', (e) => {
@@ -446,6 +490,7 @@ function buildVoiceChannelRow(channel) {
 
   const row = document.createElement('div');
   row.className = 'my-server-row';
+  row.dataset.channelId = channel.id;
   row.classList.toggle('active', state.hasEntered && channel.id === state.roomId);
   row.tabIndex = 0;
   row.setAttribute('role', 'button');
@@ -615,7 +660,8 @@ function joinRoom(roomId, displayLabel = roomId) {
   // else identifying it as a room. Discord doesn't prefix its channel names
   // with a redundant "Channel:" either.
   roomCodeLabel.classList.toggle('hidden', displayLabel.startsWith('#'));
-  setChannelLabel(displayLabel);
+  viewingChannelId = roomId; // entering a room always resets any peeked-at channel back to this one
+  setViewingChannel(roomId, displayLabel);
   refreshParticipants();
 
   lobby.style.display = 'none';

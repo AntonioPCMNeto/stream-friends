@@ -130,6 +130,10 @@ io.on('connection', (socket) => {
     const finalUsername = account?.username || username;
 
     socket.join(roomId);
+    // Own chat feed, same as any 'view-channel' target (see below) — entering
+    // a room always means viewing its own chat by default, until you peek at
+    // a different channel while staying connected here (voice, share, etc.).
+    socket.join(`chat:${roomId}`);
     socket.data.roomId = roomId;
     socket.data.username = finalUsername;
 
@@ -228,13 +232,36 @@ io.on('connection', (socket) => {
     io.to(to).emit('watch-status', { from: socket.id, purpose, watching: Boolean(watching) });
   });
 
-  // Room-wide text chat. Echoed back to the sender too (io.to, not
-  // socket.to) so rendering has a single path — the client tells its own
-  // messages apart from others' by comparing `from` to its own socket id.
-  socket.on('chat-message', ({ text }) => {
-    const { roomId, username } = socket.data;
-    if (!roomId || !isValidChatMessage(text)) return;
-    io.to(roomId).emit('chat-message', { from: socket.id, username, text: text.trim(), ts: Date.now() });
+  // Lets a socket read (and post to) a channel's chat without actually
+  // joining it as a room member — the "stay in voice, peek at a text
+  // channel" case (see lobby.js's peekChannelChat). Distinct room namespace
+  // ('chat:' prefix) from the real join-room membership, specifically so a
+  // peek never also subscribes this socket to that channel's presence/
+  // sharing broadcasts (those go to the bare channelId room, not this one) —
+  // otherwise a friend starting a screen share in the channel you're just
+  // glancing at would incorrectly show up in your own participant list.
+  // Replaces whatever was previously being peeked at (always the full
+  // current set, not a diff) but never drops the socket's own room's chat
+  // feed, same as watch-server's pattern for the same reason.
+  socket.on('view-channel', ({ channelId }) => {
+    if (!isValidRoomId(channelId)) return;
+    const ownChatRoom = socket.data.roomId ? `chat:${socket.data.roomId}` : null;
+    [...socket.rooms].filter((r) => r.startsWith('chat:') && r !== ownChatRoom).forEach((r) => socket.leave(r));
+    socket.join(`chat:${channelId}`);
+  });
+
+  // Chat for whichever channel the client says it's viewing (its own room by
+  // default, or a peeked one — see 'view-channel' above), not implicitly
+  // socket.data.roomId, since those can now differ. Echoed back to the
+  // sender too (io.to, not socket.to) so rendering has a single path — the
+  // client tells its own messages apart from others' by comparing `from` to
+  // its own socket id. The room-membership check is what stops a client
+  // from posting into a channel it hasn't actually joined or peeked at.
+  socket.on('chat-message', ({ channelId, text }) => {
+    const { username } = socket.data;
+    if (!isValidRoomId(channelId) || !isValidChatMessage(text) || !username) return;
+    if (!socket.rooms.has(`chat:${channelId}`)) return;
+    io.to(`chat:${channelId}`).emit('chat-message', { channelId, from: socket.id, username, text: text.trim(), ts: Date.now() });
   });
 
   socket.on('disconnect', () => {

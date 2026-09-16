@@ -126,6 +126,120 @@ test('join-room with a bogus access token still succeeds as an unverified guest'
   second.close();
 });
 
+test('chat-message reaches only sockets viewing that channel', async () => {
+  const alice = await connect();
+  const bob = await connect();
+
+  alice.emit('join-room', { roomId: 'chat-room-a', username: 'Alice' });
+  bob.emit('join-room', { roomId: 'chat-room-b', username: 'Bob' }); // a different room entirely
+  await wait(100);
+
+  let bobReceived = false;
+  bob.on('chat-message', () => { bobReceived = true; });
+
+  alice.emit('chat-message', { channelId: 'chat-room-a', text: 'hello' });
+  await wait(150);
+
+  assert.strictEqual(bobReceived, false, 'a message for a channel Bob never joined/viewed must not reach him');
+
+  alice.close();
+  bob.close();
+});
+
+test('chat-message is echoed to the sender and carries the channelId', async () => {
+  const alice = await connect();
+  alice.emit('join-room', { roomId: 'chat-room-c', username: 'Alice' });
+  await wait(100);
+
+  const received = new Promise((resolve) => alice.once('chat-message', resolve));
+  alice.emit('chat-message', { channelId: 'chat-room-c', text: 'hi there' });
+  const msg = await received;
+
+  assert.strictEqual(msg.channelId, 'chat-room-c');
+  assert.strictEqual(msg.text, 'hi there');
+  assert.strictEqual(msg.username, 'Alice');
+
+  alice.close();
+});
+
+test('view-channel lets a socket read a channel it never entered via join-room', async () => {
+  const alice = await connect();
+  const bob = await connect();
+
+  // Both in the same voice room, but the chat they're peeking at lives
+  // entirely outside it — the whole point of view-channel.
+  alice.emit('join-room', { roomId: 'voice-room', username: 'Alice' });
+  bob.emit('join-room', { roomId: 'voice-room', username: 'Bob' });
+  await wait(100);
+
+  alice.emit('view-channel', { channelId: 'text-room' });
+  bob.emit('view-channel', { channelId: 'text-room' });
+  await wait(50);
+
+  const bobReceived = new Promise((resolve) => bob.once('chat-message', resolve));
+  alice.emit('chat-message', { channelId: 'text-room', text: 'peeking works' });
+
+  const msg = await bobReceived;
+  assert.strictEqual(msg.text, 'peeking works');
+
+  alice.close();
+  bob.close();
+});
+
+test('view-channel replaces a previous peek but keeps the socket\'s own room chat', async () => {
+  const alice = await connect();
+  alice.emit('join-room', { roomId: 'own-room-x', username: 'Alice' });
+  await wait(100);
+
+  alice.emit('view-channel', { channelId: 'peek-1-x' });
+  await wait(50);
+  alice.emit('view-channel', { channelId: 'peek-2-x' }); // drops peek-1-x, keeps own-room-x, adds peek-2-x
+  await wait(50);
+
+  const senderPeek1 = await connect();
+  senderPeek1.emit('join-room', { roomId: 'peek-1-x', username: 'SenderPeek1' });
+  const senderPeek2 = await connect();
+  senderPeek2.emit('join-room', { roomId: 'peek-2-x', username: 'SenderPeek2' });
+  const senderOwn = await connect();
+  senderOwn.emit('join-room', { roomId: 'own-room-x', username: 'SenderOwn' });
+  await wait(100);
+
+  const received = [];
+  alice.on('chat-message', (msg) => received.push(msg.channelId));
+
+  senderPeek1.emit('chat-message', { channelId: 'peek-1-x', text: 'stale peek' });
+  senderPeek2.emit('chat-message', { channelId: 'peek-2-x', text: 'current peek' });
+  senderOwn.emit('chat-message', { channelId: 'own-room-x', text: 'own room still works' });
+  await wait(150);
+
+  assert.ok(!received.includes('peek-1-x'), 'a dropped peek must not still deliver messages');
+  assert.ok(received.includes('peek-2-x'), 'the current peek must deliver messages');
+  assert.ok(received.includes('own-room-x'), "the socket's own entered room chat must keep working while peeking elsewhere");
+
+  alice.close();
+  senderPeek1.close();
+  senderPeek2.close();
+  senderOwn.close();
+});
+
+test('chat-message is rejected from a socket that never joined or viewed that channel', async () => {
+  const eve = await connect();
+  const bystander = await connect();
+  bystander.emit('join-room', { roomId: 'guarded-room', username: 'Bystander' });
+  await wait(100);
+
+  let bystanderReceived = false;
+  bystander.on('chat-message', () => { bystanderReceived = true; });
+
+  eve.emit('chat-message', { channelId: 'guarded-room', text: 'uninvited' });
+  await wait(150);
+
+  assert.strictEqual(bystanderReceived, false, 'a socket with no join-room/view-channel for this channel must not be able to post into it');
+
+  eve.close();
+  bystander.close();
+});
+
 test.after(() => {
   io.close();
   server.close();

@@ -14,6 +14,14 @@ const sendBtn = document.getElementById('chatSendBtn');
 let socket = null;
 let unreadCount = 0;
 
+// Which channel's messages the panel is showing/sending to — normally the
+// room you're actually in, but can point at a different channel while
+// staying connected there (see lobby.js's peekChannelChat). Messages for
+// any other channel (e.g. your own room's chat while peeking elsewhere) are
+// just ignored, not queued — there's no per-channel unread tracking here,
+// only "did I miss something in the channel I'm currently looking at".
+let viewingChannelId = null;
+
 // Consecutive messages from the same author within this window are grouped
 // Discord-style — one avatar/name/timestamp header, the rest just text.
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
@@ -44,12 +52,25 @@ function closePanel() {
   launcher.classList.remove('hidden');
 }
 
-// Called from lobby.js's joinRoom on every entry/channel switch — mirrors
-// Discord's own "Enviar mensagem para #canal" placeholder instead of a
-// generic one. label is whatever's shown in the room bar (a "#canal" name,
-// or a raw guest room code with no "#").
-export function setChannelLabel(label) {
+// Called from lobby.js on every entry/channel switch AND every peek at a
+// different channel's chat (see peekChannelChat) — points the panel at
+// channelId and relabels the input Discord-style ("Enviar mensagem para
+// #canal"). Clears the pane rather than trying to keep scrollback per
+// channel, since the server doesn't persist messages anyway — there's
+// nothing to restore when you peek back later regardless.
+export function setViewingChannel(channelId, label) {
+  viewingChannelId = channelId;
   input.placeholder = `Enviar mensagem para ${label}`;
+  messagesEl.innerHTML = '';
+  lastAuthor = null;
+  lastMessageTs = 0;
+}
+
+// Discord opens straight to the channel you clicked — used by
+// peekChannelChat so glancing at a channel while in voice doesn't leave you
+// staring at a closed launcher bubble.
+export function openPanelIfClosed() {
+  if (!isOpen()) openPanel();
 }
 
 function formatTime(ts) {
@@ -112,8 +133,8 @@ function appendMessage(username, text, ts) {
 
 function sendMessage() {
   const text = input.value.trim().slice(0, MAX_MESSAGE_LENGTH);
-  if (!text) return;
-  socket.emit('chat-message', { text });
+  if (!text || !viewingChannelId) return;
+  socket.emit('chat-message', { channelId: viewingChannelId, text });
   input.value = '';
 }
 
@@ -125,12 +146,14 @@ export function clearChat() {
   closePanel();
   lastAuthor = null;
   lastMessageTs = 0;
+  viewingChannelId = null;
 }
 
 export function initChat(theSocket) {
   socket = theSocket;
 
-  socket.on('chat-message', ({ username, text, ts }) => {
+  socket.on('chat-message', ({ channelId, username, text, ts }) => {
+    if (channelId !== viewingChannelId) return; // e.g. your own room's chat arriving while you're peeking elsewhere
     appendMessage(username, text, ts);
     if (!isOpen()) setUnread(unreadCount + 1);
   });
