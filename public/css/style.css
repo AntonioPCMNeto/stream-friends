@@ -232,7 +232,7 @@ main {
   margin: 16px 0 16px 16px;
   padding: 20px 16px;
 }
-#serverListView.hidden { display: none; }
+#noServerView.hidden { display: none; }
 #channelsView.hidden { display: none; }
 
 .sidebar-section-label {
@@ -244,16 +244,18 @@ main {
   margin: 0 0 14px;
   padding: 0 4px;
 }
-.channels-header { display: flex; flex-direction: column; gap: 3px; margin-bottom: 14px; }
-.sidebar-back-link.btn-link {
+.channels-header { margin-bottom: 14px; }
+.sidebar-server-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sidebar-leave-link.btn-link {
   display: inline-block;
   width: auto;
+  flex-shrink: 0;
   margin: 0;
   padding: 0 4px;
   font-size: 12px;
   color: var(--text-dim);
 }
-.sidebar-back-link.btn-link:hover { color: var(--accent); text-decoration: none; }
+.sidebar-leave-link.btn-link:hover { color: var(--danger); text-decoration: none; }
 .sidebar-server-name {
   font-size: 16px;
   font-weight: 700;
@@ -316,21 +318,6 @@ main {
 .my-server-row:hover .channel-hash { color: var(--text); }
 .my-server-row.active .channel-hash { color: var(--accent); }
 
-.my-server-remove {
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-}
-.my-server-remove:hover { background: color-mix(in srgb, var(--danger) 22%, transparent); color: var(--danger); }
-.my-server-remove:disabled { opacity: 0.5; cursor: default; }
 .no-servers-hint { font-size: 13px; color: var(--text-dim); margin: 0 0 12px; padding: 0 4px; }
 .create-server-form { display: flex; gap: 8px; margin: 4px 4px; }
 .create-server-form input {
@@ -952,10 +939,10 @@ main {
 .sidebar-backdrop.hidden { display: none; }
 @media (max-width: 880px) {
   .sidebar-toggle-btn:not(.hidden) { display: inline-flex; align-items: center; justify-content: center; }
-  /* The rail is a desktop shortcut alongside the full sidebar — below this
-     width the sidebar itself becomes the off-canvas drawer (below), so the
-     rail just gives way to the hamburger button instead of duplicating it. */
-  .server-rail { display: none; }
+  /* The rail is now the only way to switch servers (see index.html), so it
+     stays put even here — only the wider channel list becomes an off-canvas
+     drawer, and it overlays the rail (higher z-index, same left edge) when
+     open rather than needing to hide it first. */
   #serverSidebar:not(.hidden) {
     position: fixed;
     left: 0;
@@ -973,6 +960,58 @@ main {
   }
   #serverSidebar.open { transform: translateX(0); }
 }
+
+/* Discord's own "Add a Server" modal — centered, dismissible via backdrop
+   click, replacing the old always-visible "Meus Servidores" list. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-backdrop.hidden { display: none; }
+.modal {
+  width: 420px;
+  max-width: calc(100vw - 40px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 18px;
+}
+.modal-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-tab {
+  flex: 1;
+  padding: 0 0 10px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.modal-tab:hover { color: var(--text); }
+.modal-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.modal-tab-panel.hidden { display: none; }
+.modal-tab-panel .btn { width: 100%; }
 
 .share-panel {
   position: absolute;

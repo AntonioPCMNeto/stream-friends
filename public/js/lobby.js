@@ -46,18 +46,27 @@ const serverRail = document.getElementById('serverRail');
 const authDividerServers = document.getElementById('authDividerServers');
 const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
 const sidebarBackdrop = document.getElementById('sidebarBackdrop');
-const serverListView = document.getElementById('serverListView');
-const myServersList = document.getElementById('myServersList');
-const createServerNameInput = document.getElementById('createServerNameInput');
-const createServerBtn = document.getElementById('createServerBtn');
-const createServerError = document.getElementById('createServerError');
+const noServerView = document.getElementById('noServerView');
 const channelsView = document.getElementById('channelsView');
-const backToServersBtn = document.getElementById('backToServersBtn');
+const leaveServerBtn = document.getElementById('leaveServerBtn');
 const selectedServerName = document.getElementById('selectedServerName');
 const channelsList = document.getElementById('channelsList');
 const createChannelNameInput = document.getElementById('createChannelNameInput');
 const createChannelBtn = document.getElementById('createChannelBtn');
 const createChannelError = document.getElementById('createChannelError');
+const serverModalBackdrop = document.getElementById('serverModalBackdrop');
+const serverModal = document.getElementById('serverModal');
+const serverModalCloseBtn = document.getElementById('serverModalCloseBtn');
+const serverModalCreateTabBtn = document.getElementById('serverModalCreateTabBtn');
+const serverModalJoinTabBtn = document.getElementById('serverModalJoinTabBtn');
+const serverModalCreatePanel = document.getElementById('serverModalCreatePanel');
+const serverModalJoinPanel = document.getElementById('serverModalJoinPanel');
+const createServerNameInput = document.getElementById('createServerNameInput');
+const createServerBtn = document.getElementById('createServerBtn');
+const createServerError = document.getElementById('createServerError');
+const joinServerCodeInput = document.getElementById('joinServerCodeInput');
+const joinServerBtn = document.getElementById('joinServerBtn');
+const joinServerError = document.getElementById('joinServerError');
 
 let socket = null;
 
@@ -78,6 +87,7 @@ if (prefilledRoom) roomCodeInput.value = prefilledRoom;
 
 const USERNAME_STORAGE_KEY = 'scrimaAi.username';
 const ROOM_STORAGE_KEY = 'scrimaAi.currentRoom';
+const SERVER_STORAGE_KEY = 'scrimaAi.lastServer';
 
 // Wrapped defensively — localStorage can throw in private/locked-down contexts.
 function loadSavedUsername() {
@@ -120,6 +130,25 @@ function clearSavedRoom() {
     localStorage.removeItem(ROOM_STORAGE_KEY);
   } catch {
     // Ignore.
+  }
+}
+
+// Which server the sidebar should land on next time refreshMyServers runs
+// (e.g. after sign-in) — lets it skip straight to a real channel list
+// instead of showing an intermediate "pick a server" state on every login.
+function loadSavedServerId() {
+  try {
+    return localStorage.getItem(SERVER_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveServerId(roomId) {
+  try {
+    localStorage.setItem(SERVER_STORAGE_KEY, roomId);
+  } catch {
+    // Ignore — persistence is a nice-to-have.
   }
 }
 
@@ -177,17 +206,16 @@ function applyAuthMode() {
   authError.textContent = '';
 }
 
-// The server a user has drilled into in the lobby (see openServerChannels
-// below) — null while browsing the server list itself. Not room state:
-// this is purely about which view the "Meus Servidores" card is showing,
-// unrelated to state.roomId (which only gets set once a channel is
-// actually entered).
+// The server currently selected via the rail (see openServerChannels below)
+// — null only when the account has no servers at all. Not room state: this
+// is purely about which server's channels the sidebar is showing, unrelated
+// to state.roomId (which only gets set once a channel is actually entered).
 let selectedServer = null;
 
-function showServerListView() {
+function showNoServerView() {
   selectedServer = null;
   channelsView.classList.add('hidden');
-  serverListView.classList.remove('hidden');
+  noServerView.classList.remove('hidden');
   updateServerRailActive();
 }
 
@@ -202,75 +230,32 @@ function closeSidebarOnMobile() {
 }
 
 // Persistent "servers" (see rooms.js) — signed-in only, since membership is
-// tied to an account. Clicking a listed server drills into its channel
-// list (openServerChannels); entering a room only happens once a specific
-// channel is picked there.
+// tied to an account. The rail is the only place that lists them; this just
+// picks which one the sidebar lands on (openServerChannels) — the last one
+// used, or the most recently joined/created if there's no saved pick, or
+// the empty state if the account has none at all.
 //
 // Supabase's auth listener can fire more than once in quick succession
 // while a session is being resolved on load, so this can end up called
 // several times concurrently. A request token makes sure only the latest
 // call's response ever renders — an overtaken response is dropped instead
-// of appending onto a list an older call already started clearing/filling.
+// of racing an older call's own selection.
 let serversRequestId = 0;
 async function refreshMyServers() {
-  showServerListView(); // this always means "show me my servers" — drop any open channel view
   const requestId = ++serversRequestId;
   const myRooms = await rooms.listMyRooms();
   if (requestId !== serversRequestId) return;
 
   renderServerRail(myRooms);
-  myServersList.innerHTML = '';
 
   if (myRooms.length === 0) {
-    const hint = document.createElement('p');
-    hint.className = 'no-servers-hint';
-    hint.textContent = 'Você ainda não tem servidores.';
-    myServersList.appendChild(hint);
+    showNoServerView();
     return;
   }
 
-  myRooms.forEach((room) => {
-    // A plain div, not a <button> — it now has a real <button> nested inside
-    // it (the remove action), and a button can't legally contain a button.
-    // tabindex + keydown keep it keyboard-accessible like the button it replaces.
-    const row = document.createElement('div');
-    row.className = 'my-server-row';
-    row.tabIndex = 0;
-    row.setAttribute('role', 'button');
-    const icon = buildAvatar(room.name);
-    icon.classList.add('avatar-sm');
-    row.appendChild(icon);
-    const name = document.createElement('span');
-    name.className = 'row-label';
-    name.textContent = room.name;
-    row.appendChild(name);
-    const activateRow = () => openServerChannels(room);
-    row.addEventListener('click', activateRow);
-    row.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activateRow(); }
-    });
-
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button';
-    removeBtn.className = 'my-server-remove';
-    removeBtn.textContent = '✕';
-    removeBtn.title = `Sair de "${room.name}"`;
-    removeBtn.addEventListener('click', async (e) => {
-      e.stopPropagation(); // don't also trigger the row's own "enter room" click
-      if (!confirm(`Sair de "${room.name}"? Você só volta a entrar com um novo convite.`)) return;
-      removeBtn.disabled = true;
-      const { error } = await rooms.leaveRoom(room.id);
-      if (error) {
-        showToast(error, 'error');
-        removeBtn.disabled = false;
-        return;
-      }
-      refreshMyServers();
-    });
-    row.appendChild(removeBtn);
-
-    myServersList.appendChild(row);
-  });
+  const savedId = loadSavedServerId();
+  const target = myRooms.find((room) => room.id === savedId) || myRooms[myRooms.length - 1];
+  openServerChannels(target);
 }
 
 // Discord's own leftmost strip — quick server switching alongside the full
@@ -294,13 +279,10 @@ function renderServerRail(myRooms) {
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
   addBtn.className = 'server-rail-icon server-rail-add';
-  addBtn.title = 'Criar servidor';
-  addBtn.setAttribute('aria-label', 'Criar servidor');
+  addBtn.title = 'Adicionar servidor';
+  addBtn.setAttribute('aria-label', 'Adicionar servidor');
   addBtn.textContent = '+';
-  addBtn.addEventListener('click', () => {
-    showServerListView();
-    createServerNameInput.focus();
-  });
+  addBtn.addEventListener('click', openServerModal);
   serverRail.appendChild(addBtn);
 
   updateServerRailActive();
@@ -315,16 +297,45 @@ function updateServerRailActive() {
   });
 }
 
-// Drills into one server's channel list, replacing the server list in the
-// same card (see showServerListView for the way back).
+// Switches the sidebar to one server's channel list — the only view it
+// ever shows once an account has at least one server (see showNoServerView
+// for the empty-account fallback).
 function openServerChannels(room) {
   selectedServer = room;
+  saveServerId(room.id);
   selectedServerName.textContent = room.name;
   createChannelError.textContent = '';
-  serverListView.classList.add('hidden');
+  noServerView.classList.add('hidden');
   channelsView.classList.remove('hidden');
   updateServerRailActive();
   refreshChannels();
+}
+
+function switchServerModalTab(tab) {
+  const isCreate = tab === 'create';
+  serverModalCreateTabBtn.classList.toggle('active', isCreate);
+  serverModalJoinTabBtn.classList.toggle('active', !isCreate);
+  serverModalCreateTabBtn.setAttribute('aria-selected', String(isCreate));
+  serverModalJoinTabBtn.setAttribute('aria-selected', String(!isCreate));
+  serverModalCreatePanel.classList.toggle('hidden', !isCreate);
+  serverModalJoinPanel.classList.toggle('hidden', isCreate);
+}
+
+// The rail's + button — Discord's own "create or join" choice, replacing
+// the old always-visible "Meus Servidores" list (which just duplicated the
+// rail) with an on-demand modal.
+function openServerModal() {
+  createServerError.textContent = '';
+  joinServerError.textContent = '';
+  createServerNameInput.value = '';
+  joinServerCodeInput.value = '';
+  switchServerModalTab('create');
+  serverModalBackdrop.classList.remove('hidden');
+  createServerNameInput.focus();
+}
+
+function closeServerModal() {
+  serverModalBackdrop.classList.add('hidden');
 }
 
 // Same request-token guard as refreshMyServers, for the same reason
@@ -410,7 +421,7 @@ function applyAuthUX() {
     usernameInput.value = identity.username || '';
     refreshMyServers();
   } else {
-    showServerListView(); // don't leave a signed-out session's lobby stuck mid-channel-view for next time
+    showNoServerView(); // don't leave a signed-out session's lobby stuck mid-channel-view for next time
     applyAuthMode();
     applyReturningUserUX();
   }
@@ -619,9 +630,10 @@ export async function initLobby(theSocket) {
       const { room, error } = await rooms.createRoom(name);
       if (error) { createServerError.textContent = error; return; }
 
-      createServerNameInput.value = '';
+      closeServerModal();
       roomCodeInput.value = room.id;
       enterRoom();
+      refreshMyServers(); // picks up the new server on the rail/sidebar
     } finally {
       createServerBtn.disabled = false;
     }
@@ -630,7 +642,52 @@ export async function initLobby(theSocket) {
     if (e.key === 'Enter') createServerBtn.click();
   });
 
-  backToServersBtn.addEventListener('click', showServerListView);
+  joinServerBtn.addEventListener('click', async () => {
+    if (joinServerBtn.disabled) return;
+    joinServerError.textContent = '';
+    const code = joinServerCodeInput.value.trim();
+    if (!code) { joinServerError.textContent = 'Cole um código de convite.'; return; }
+
+    joinServerBtn.disabled = true;
+    try {
+      const { room, error } = await rooms.joinRoomByCode(code);
+      if (error) { joinServerError.textContent = error; return; }
+
+      closeServerModal();
+      roomCodeInput.value = room.id;
+      enterRoom();
+      refreshMyServers();
+    } finally {
+      joinServerBtn.disabled = false;
+    }
+  });
+  joinServerCodeInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') joinServerBtn.click();
+  });
+
+  serverModalCreateTabBtn.addEventListener('click', () => switchServerModalTab('create'));
+  serverModalJoinTabBtn.addEventListener('click', () => switchServerModalTab('join'));
+  serverModalCloseBtn.addEventListener('click', closeServerModal);
+  serverModalBackdrop.addEventListener('click', (e) => {
+    if (e.target === serverModalBackdrop) closeServerModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !serverModalBackdrop.classList.contains('hidden')) closeServerModal();
+  });
+
+  leaveServerBtn.addEventListener('click', async () => {
+    if (!selectedServer || leaveServerBtn.disabled) return;
+    if (!confirm(`Sair de "${selectedServer.name}"? Você só volta a entrar com um novo convite.`)) return;
+
+    leaveServerBtn.disabled = true;
+    try {
+      const { error } = await rooms.leaveRoom(selectedServer.id);
+      if (error) { showToast(error, 'error'); return; }
+      refreshMyServers();
+    } finally {
+      leaveServerBtn.disabled = false;
+    }
+  });
 
   sidebarToggleBtn.addEventListener('click', () => {
     const opening = !serverSidebar.classList.contains('open');

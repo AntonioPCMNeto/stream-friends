@@ -16,28 +16,25 @@
   </header>
 
   <div id="appShell">
-    <!-- Discord's own leftmost strip — circular server icons for quick
-         switching, additive to (not a replacement for) the full "Meus
-         Servidores" list in #serverSidebar, which still owns creating a
-         server and the channel drill-down. Desktop-only (see the sidebar's
-         own off-canvas breakpoint) — mobile keeps using the existing list. -->
+    <!-- Discord's own leftmost strip — circular server icons, the only way
+         to switch servers (no redundant list in #serverSidebar, which just
+         shows the selected server's channels). Stays visible at every width,
+         including below the sidebar's own off-canvas breakpoint (see
+         style.css), where the channel list becomes a drawer but the rail
+         doesn't. -->
     <nav id="serverRail" class="server-rail hidden"></nav>
     <aside id="serverSidebar" class="hidden">
-      <div id="serverListView">
-        <div class="sidebar-section-label">Meus Servidores</div>
-        <div id="myServersList" class="my-servers-list"></div>
-
-        <div class="create-server-form">
-          <input id="createServerNameInput" type="text" placeholder="Nome do novo servidor" maxlength="40">
-          <button id="createServerBtn" class="btn btn-ghost btn-small">+ Criar</button>
-        </div>
-        <p id="createServerError" class="error"></p>
+      <div id="noServerView">
+        <div class="sidebar-section-label">Servidores</div>
+        <p class="no-servers-hint">Crie ou entre em um servidor pelo botão + no menu à esquerda.</p>
       </div>
 
       <div id="channelsView" class="hidden">
         <div class="channels-header">
-          <button id="backToServersBtn" type="button" class="btn-link sidebar-back-link">← Voltar</button>
-          <div id="selectedServerName" class="sidebar-server-name"></div>
+          <div class="sidebar-server-row">
+            <div id="selectedServerName" class="sidebar-server-name"></div>
+            <button id="leaveServerBtn" type="button" class="btn-link sidebar-leave-link" title="Sair do servidor">Sair</button>
+          </div>
         </div>
         <div id="channelsList" class="my-servers-list"></div>
 
@@ -49,6 +46,41 @@
       </div>
     </aside>
     <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
+
+    <!-- Discord's own "Add a Server" modal — triggered by the rail's +
+         button. Two tabs (create vs. join-by-code) instead of the old
+         always-visible "Meus Servidores" list, which just duplicated what
+         the rail icons already do. -->
+    <div id="serverModalBackdrop" class="modal-backdrop hidden">
+      <div id="serverModal" class="modal" role="dialog" aria-modal="true" aria-label="Adicionar servidor">
+        <div class="modal-header">
+          <span>Adicionar um servidor</span>
+          <button id="serverModalCloseBtn" class="chat-close-btn" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-tabs" role="tablist">
+          <button type="button" id="serverModalCreateTabBtn" class="modal-tab active" role="tab" aria-selected="true">Criar servidor</button>
+          <button type="button" id="serverModalJoinTabBtn" class="modal-tab" role="tab" aria-selected="false">Entrar com código</button>
+        </div>
+
+        <div id="serverModalCreatePanel" class="modal-tab-panel">
+          <label class="field">
+            <span>Nome do servidor</span>
+            <input id="createServerNameInput" type="text" placeholder="ex.: Squad da Firulla" maxlength="40">
+          </label>
+          <p id="createServerError" class="error"></p>
+          <button id="createServerBtn" class="btn btn-primary">Criar servidor</button>
+        </div>
+
+        <div id="serverModalJoinPanel" class="modal-tab-panel hidden">
+          <label class="field">
+            <span>Código do convite</span>
+            <input id="joinServerCodeInput" type="text" placeholder="Cole o código aqui" maxlength="40">
+          </label>
+          <p id="joinServerError" class="error"></p>
+          <button id="joinServerBtn" class="btn btn-primary">Entrar no servidor</button>
+        </div>
+      </div>
+    </div>
 
     <main>
     <div id="lobby" class="card">

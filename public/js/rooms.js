@@ -45,6 +45,18 @@ export async function tryJoinByInvite(roomId) {
   return data;
 }
 
+// Explicit "join this server" action (the modal's join-by-code tab) — same
+// RPC as tryJoinByInvite, but a bad code here is a real error to show the
+// user rather than an expected, silently-swallowed no-op.
+export async function joinRoomByCode(code) {
+  const supabase = getClient();
+  if (!supabase) return { error: 'Contas não estão configuradas neste servidor.' };
+  const { data, error } = await supabase.rpc('join_room_by_invite', { invite: code });
+  if (error) return { error: error.message };
+  if (!data) return { error: 'Código de convite inválido.' };
+  return { room: data };
+}
+
 // Removes your own membership row, dropping the server off "Meus
 // Servidores". Doesn't touch the room itself or other members — same
 // RPC-only convention as createRoom/tryJoinByInvite, since RLS only grants
