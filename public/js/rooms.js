@@ -76,7 +76,7 @@ export async function leaveRoom(roomId) {
 export async function listChannels(roomId) {
   const supabase = getClient();
   if (!supabase) return [];
-  const { data, error } = await supabase.from('channels').select('id, name').eq('room_id', roomId).order('created_at');
+  const { data, error } = await supabase.from('channels').select('id, name, type').eq('room_id', roomId).order('created_at');
   if (error) {
     console.error('Failed to list channels:', error);
     return [];
@@ -87,10 +87,25 @@ export async function listChannels(roomId) {
 // Returns { channel } on success or { error } — same convention as
 // createRoom. Goes through the create_channel RPC (not a direct insert)
 // since it also checks the caller is actually a member of the room.
-export async function createChannel(roomId, name) {
+// create_channel itself only ever makes a 'text' channel (its signature
+// predates the type column, see supabase/migrations/0001_channel_type.sql)
+// — a 'voice' request is a second RPC call, set_channel_type, right after.
+// Non-fatal if that second call fails: the channel still exists as text,
+// just not the kind that was asked for, rather than not existing at all.
+export async function createChannel(roomId, name, type = 'text') {
   const supabase = getClient();
   if (!supabase) return { error: 'Contas não estão configuradas neste servidor.' };
   const { data, error } = await supabase.rpc('create_channel', { target_room_id: roomId, channel_name: name });
   if (error) return { error: error.message };
+
+  if (type === 'voice') {
+    const { error: typeError } = await supabase.rpc('set_channel_type', { target_channel_id: data.id, new_type: 'voice' });
+    if (typeError) {
+      console.error('Failed to set channel type to voice:', typeError);
+      return { channel: data };
+    }
+    return { channel: { ...data, type: 'voice' } };
+  }
+
   return { channel: data };
 }

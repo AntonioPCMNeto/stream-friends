@@ -36,8 +36,17 @@
             <button id="leaveServerBtn" type="button" class="btn-link sidebar-leave-link" title="Sair do servidor">Sair</button>
           </div>
         </div>
-        <div id="channelsList" class="my-servers-list"></div>
 
+        <div class="sidebar-section-label">Canais de Texto</div>
+        <div id="textChannelsList" class="my-servers-list"></div>
+
+        <div class="sidebar-section-label">Canais de Voz</div>
+        <div id="voiceChannelsList" class="my-servers-list"></div>
+
+        <div id="createChannelTypeGroup" class="segmented" data-value="text" role="group" aria-label="Tipo de canal">
+          <button type="button" data-value="text" class="active" aria-pressed="true"># Texto</button>
+          <button type="button" data-value="voice" aria-pressed="false">🔊 Voz</button>
+        </div>
         <div class="create-server-form">
           <input id="createChannelNameInput" type="text" placeholder="Nome do novo canal" maxlength="40">
           <button id="createChannelBtn" class="btn btn-ghost btn-small">+ Criar</button>

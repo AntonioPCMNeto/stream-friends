@@ -37,7 +37,8 @@ let webcamCaptureInFlight = false;
 
 // Wires a row of segmented buttons: clicking one marks it active and
 // updates the group's data-value, which the Start button reads later.
-function initSegmented(group) {
+// Exported for reuse by lobby.js's create-channel type picker.
+export function initSegmented(group) {
   group.querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', () => {
       group.querySelectorAll('button').forEach((b) => {

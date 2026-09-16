@@ -98,6 +98,22 @@ function isValidPurpose(purpose) {
   return PURPOSES.includes(purpose);
 }
 
+// Who's currently in voice in a given channel (= roomId here — see the
+// `rooms` map above; "room" in this file is "channel" in the UI/DB sense).
+// Used both for a new sidebar watcher's initial snapshot and for live
+// updates broadcast to 'watch:<channelId>' — see 'watch-server' below.
+function getVoiceOccupants(roomId) {
+  const room = rooms.get(roomId);
+  if (!room) return [];
+  return Array.from(room.values())
+    .filter((info) => info.sharing.voice)
+    .map((info) => ({ username: info.username, verified: info.verified }));
+}
+
+function broadcastVoiceOccupancy(roomId) {
+  io.to(`watch:${roomId}`).emit('voice-occupancy', { channelId: roomId, occupants: getVoiceOccupants(roomId) });
+}
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
@@ -180,6 +196,25 @@ io.on('connection', (socket) => {
 
     info.sharing[purpose] = Boolean(isSharing);
     socket.to(roomId).emit('peer-share-status', { id: socket.id, purpose, isSharing: info.sharing[purpose] });
+    if (purpose === 'voice') broadcastVoiceOccupancy(roomId);
+  });
+
+  // A sidebar viewer telling us which channels it wants live voice-occupancy
+  // updates for (Discord-style "who's in this voice channel" nested under
+  // each row) — see lobby.js's refreshChannels. Not scoped to the caller's
+  // own joined room: this is for channels the client is only *looking at*,
+  // possibly none of which it's actually connected to. Replaces whatever
+  // set it was previously watching (a fresh full list every time, not a
+  // diff) since a channel switch fully reconnects the socket anyway,
+  // wiping any previous 'watch:' room membership.
+  socket.on('watch-server', ({ channelIds }) => {
+    if (!Array.isArray(channelIds)) return;
+    const validIds = channelIds.filter(isValidRoomId).slice(0, 200);
+
+    [...socket.rooms].filter((r) => r.startsWith('watch:')).forEach((r) => socket.leave(r));
+    validIds.forEach((id) => socket.join(`watch:${id}`));
+
+    socket.emit('voice-occupancy-snapshot', validIds.map((id) => ({ channelId: id, occupants: getVoiceOccupants(id) })));
   });
 
   // A viewer telling one specific sharer whether it still wants a given
@@ -207,9 +242,11 @@ io.on('connection', (socket) => {
     const { roomId } = socket.data;
     if (roomId && rooms.has(roomId)) {
       const room = rooms.get(roomId);
+      const wasInVoice = room.get(socket.id)?.sharing.voice;
       room.delete(socket.id);
       if (room.size === 0) rooms.delete(roomId);
       socket.to(roomId).emit('peer-left', socket.id);
+      if (wasInVoice) broadcastVoiceOccupancy(roomId);
     }
   });
 });

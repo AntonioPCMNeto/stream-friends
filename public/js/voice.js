@@ -354,7 +354,9 @@ function handleSpeakerSelectChange() {
   audioSinks.forEach((audio) => applySpeakerSink(audio));
 }
 
-async function joinVoice() {
+// Exported so lobby.js can auto-connect when a Discord-style voice channel
+// row is clicked, the same way clicking joinBtn does below.
+export async function joinVoice() {
   if (state.isInVoice) return;
   if (!navigator.mediaDevices?.getUserMedia) {
     showToast('Microfone não é suportado neste navegador/dispositivo.', 'error');

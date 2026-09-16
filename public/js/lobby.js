@@ -1,10 +1,10 @@
 import { state } from './state.js';
-import { stopSharing, stopWebcam } from './share.js';
+import { stopSharing, stopWebcam, initSegmented } from './share.js';
 import { closeAllPeerConnections } from './peers.js';
 import { refreshParticipants } from './participants.js';
 import { showToast } from './toast.js';
 import { clearChat, setChannelLabel } from './chat.js';
-import { resetVoice } from './voice.js';
+import { resetVoice, joinVoice } from './voice.js';
 import * as auth from './auth.js';
 import * as rooms from './rooms.js';
 import { buildAvatar } from './identity.js';
@@ -50,7 +50,9 @@ const noServerView = document.getElementById('noServerView');
 const channelsView = document.getElementById('channelsView');
 const leaveServerBtn = document.getElementById('leaveServerBtn');
 const selectedServerName = document.getElementById('selectedServerName');
-const channelsList = document.getElementById('channelsList');
+const textChannelsList = document.getElementById('textChannelsList');
+const voiceChannelsList = document.getElementById('voiceChannelsList');
+const createChannelTypeGroup = document.getElementById('createChannelTypeGroup');
 const createChannelNameInput = document.getElementById('createChannelNameInput');
 const createChannelBtn = document.getElementById('createChannelBtn');
 const createChannelError = document.getElementById('createChannelError');
@@ -217,6 +219,7 @@ function showNoServerView() {
   channelsView.classList.add('hidden');
   noServerView.classList.remove('hidden');
   updateServerRailActive();
+  sendWatchServer([]);
 }
 
 // Below the mobile breakpoint the sidebar is an off-canvas overlay (see
@@ -338,6 +341,120 @@ function closeServerModal() {
   serverModalBackdrop.classList.add('hidden');
 }
 
+// Live "who's talking in this voice channel" (server.js's 'voice-occupancy'
+// broadcast) — channelId -> [{ username, verified }], kept independent of
+// whichever channel rows currently happen to be rendered so a server-wide
+// snapshot arriving right after refreshChannels() rebuilds the list isn't
+// racing against DOM that doesn't exist yet.
+const channelOccupancy = new Map();
+
+// Re-sent after every reconnect (see the 'connect' handler below) — a
+// channel switch fully disconnects/reconnects the socket (see joinRoom),
+// which wipes all of its Socket.IO room memberships including 'watch:*'.
+let lastWatchedChannelIds = [];
+
+function sendWatchServer(channelIds) {
+  lastWatchedChannelIds = channelIds;
+  socket?.emit('watch-server', { channelIds });
+}
+
+function renderOccupants(el, occupants) {
+  el.innerHTML = '';
+  occupants.forEach(({ username }) => {
+    const row = document.createElement('div');
+    row.className = 'voice-channel-occupant';
+    const avatar = buildAvatar(username);
+    avatar.classList.add('avatar-sm');
+    row.appendChild(avatar);
+    const name = document.createElement('span');
+    name.textContent = username;
+    row.appendChild(name);
+    el.appendChild(row);
+  });
+}
+
+function updateChannelOccupancy(channelId, occupants) {
+  channelOccupancy.set(channelId, occupants);
+  const el = voiceChannelsList.querySelector(`.voice-channel-occupants[data-channel-id="${channelId}"]`);
+  if (el) renderOccupants(el, occupants);
+}
+
+function buildChannelHint(text) {
+  const hint = document.createElement('p');
+  hint.className = 'no-servers-hint';
+  hint.textContent = text;
+  return hint;
+}
+
+function buildTextChannelRow(channel) {
+  const row = document.createElement('div');
+  row.className = 'my-server-row';
+  row.classList.toggle('active', state.hasEntered && channel.id === state.roomId);
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  const hash = document.createElement('span');
+  hash.className = 'channel-hash';
+  hash.textContent = '#';
+  row.appendChild(hash);
+  const name = document.createElement('span');
+  name.className = 'row-label';
+  name.textContent = channel.name;
+  row.appendChild(name);
+  const activateRow = () => {
+    joinRoom(channel.id, `#${channel.name}`);
+    closeSidebarOnMobile();
+  };
+  row.addEventListener('click', activateRow);
+  row.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activateRow(); }
+  });
+  return row;
+}
+
+// Clicking a voice channel both switches into it AND connects you to its
+// audio immediately, the way Discord's own voice channels work — unlike a
+// text channel, there's no separate "now join the call" step. The nested
+// occupant list underneath is purely presentational (not itself clickable);
+// it starts from whatever channelOccupancy already has cached and catches
+// up via 'voice-occupancy'/'voice-occupancy-snapshot' once watch-server's
+// response arrives.
+function buildVoiceChannelRow(channel) {
+  const wrap = document.createElement('div');
+  wrap.className = 'voice-channel';
+
+  const row = document.createElement('div');
+  row.className = 'my-server-row';
+  row.classList.toggle('active', state.hasEntered && channel.id === state.roomId);
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  const icon = document.createElement('span');
+  icon.className = 'channel-voice-icon';
+  icon.textContent = '🔊';
+  row.appendChild(icon);
+  const name = document.createElement('span');
+  name.className = 'row-label';
+  name.textContent = channel.name;
+  row.appendChild(name);
+  const activateRow = () => {
+    joinRoom(channel.id, `🔊 ${channel.name}`);
+    closeSidebarOnMobile();
+    joinVoice();
+  };
+  row.addEventListener('click', activateRow);
+  row.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activateRow(); }
+  });
+  wrap.appendChild(row);
+
+  const occupants = document.createElement('div');
+  occupants.className = 'voice-channel-occupants';
+  occupants.dataset.channelId = channel.id;
+  renderOccupants(occupants, channelOccupancy.get(channel.id) || []);
+  wrap.appendChild(occupants);
+
+  return wrap;
+}
+
 // Same request-token guard as refreshMyServers, for the same reason
 // (overlapping calls shouldn't let a stale response render over a newer one).
 let channelsRequestId = 0;
@@ -347,40 +464,25 @@ async function refreshChannels() {
   const channels = await rooms.listChannels(server.id);
   if (requestId !== channelsRequestId || selectedServer !== server) return;
 
-  channelsList.innerHTML = '';
+  textChannelsList.innerHTML = '';
+  voiceChannelsList.innerHTML = '';
 
-  if (channels.length === 0) {
-    const hint = document.createElement('p');
-    hint.className = 'no-servers-hint';
-    hint.textContent = 'Nenhum canal ainda.';
-    channelsList.appendChild(hint);
-    return;
+  const textChannels = channels.filter((c) => c.type !== 'voice');
+  const voiceChannels = channels.filter((c) => c.type === 'voice');
+
+  if (textChannels.length === 0) {
+    textChannelsList.appendChild(buildChannelHint('Nenhum canal de texto ainda.'));
+  } else {
+    textChannels.forEach((channel) => textChannelsList.appendChild(buildTextChannelRow(channel)));
   }
 
-  channels.forEach((channel) => {
-    const row = document.createElement('div');
-    row.className = 'my-server-row';
-    row.classList.toggle('active', state.hasEntered && channel.id === state.roomId);
-    row.tabIndex = 0;
-    row.setAttribute('role', 'button');
-    const hash = document.createElement('span');
-    hash.className = 'channel-hash';
-    hash.textContent = '#';
-    row.appendChild(hash);
-    const name = document.createElement('span');
-    name.className = 'row-label';
-    name.textContent = channel.name;
-    row.appendChild(name);
-    const activateRow = () => {
-      joinRoom(channel.id, `#${channel.name}`);
-      closeSidebarOnMobile();
-    };
-    row.addEventListener('click', activateRow);
-    row.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activateRow(); }
-    });
-    channelsList.appendChild(row);
-  });
+  if (voiceChannels.length === 0) {
+    voiceChannelsList.appendChild(buildChannelHint('Nenhum canal de voz ainda.'));
+  } else {
+    voiceChannels.forEach((channel) => voiceChannelsList.appendChild(buildVoiceChannelRow(channel)));
+  }
+
+  sendWatchServer(channels.map((c) => c.id));
 }
 
 // Signed in ⇒ identity is verified server-side and can't be spoofed, so the
@@ -578,6 +680,8 @@ function attemptAutoJoin() {
 export async function initLobby(theSocket) {
   socket = theSocket;
 
+  initSegmented(createChannelTypeGroup);
+
   enterBtn.addEventListener('click', enterRoom);
   usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
   roomCodeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
@@ -705,7 +809,7 @@ export async function initLobby(theSocket) {
 
     createChannelBtn.disabled = true;
     try {
-      const { error } = await rooms.createChannel(selectedServer.id, name);
+      const { error } = await rooms.createChannel(selectedServer.id, name, createChannelTypeGroup.dataset.value);
       if (error) { createChannelError.textContent = error; return; }
 
       createChannelNameInput.value = '';
@@ -753,9 +857,18 @@ export async function initLobby(theSocket) {
       socket.emit('join-room', { roomId: state.roomId, username: state.myUsername, clientId, accessToken: identity?.accessToken });
       if (hasConnectedBefore && !isSwitchingChannel) showToast('Reconectado à sala.');
     }
+    // Same reconnect wipes any 'watch:*' Socket.IO room membership the
+    // server was tracking for us (see server.js's 'watch-server' handler) —
+    // re-register whatever the sidebar was last watching.
+    if (lastWatchedChannelIds.length) socket.emit('watch-server', { channelIds: lastWatchedChannelIds });
     isSwitchingChannel = false;
     hasConnectedBefore = true;
   });
+
+  socket.on('voice-occupancy-snapshot', (list) => {
+    list.forEach(({ channelId, occupants }) => updateChannelOccupancy(channelId, occupants));
+  });
+  socket.on('voice-occupancy', ({ channelId, occupants }) => updateChannelOccupancy(channelId, occupants));
 
   socket.on('disconnect', () => {
     connectionDot.classList.remove('connected');
