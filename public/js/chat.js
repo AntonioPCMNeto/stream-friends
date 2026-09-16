@@ -44,6 +44,14 @@ function closePanel() {
   launcher.classList.remove('hidden');
 }
 
+// Called from lobby.js's joinRoom on every entry/channel switch — mirrors
+// Discord's own "Enviar mensagem para #canal" placeholder instead of a
+// generic one. label is whatever's shown in the room bar (a "#canal" name,
+// or a raw guest room code with no "#").
+export function setChannelLabel(label) {
+  input.placeholder = `Enviar mensagem para ${label}`;
+}
+
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }

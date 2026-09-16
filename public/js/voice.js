@@ -125,21 +125,24 @@ function setVoiceUI() {
   activeControls.classList.toggle('hidden', !inVoice);
   connectedBar.classList.toggle('hidden', !inVoice);
 
-  // Colour is the whole signal — btn-danger when active — so the icon can
-  // stay put instead of swapping to a hard-to-read "slashed" emoji.
+  // Discord's own signal is the icon shape itself (crossed-out mic/headset),
+  // not just a color tint — color alone reads as "something's different"
+  // without saying what. Kept alongside the color tint, not instead of it.
+  muteBtn.textContent = state.isMuted ? '🔇' : '🎤';
   muteBtn.classList.toggle('btn-danger', state.isMuted);
   muteBtn.classList.toggle('btn-ghost', !state.isMuted);
   muteBtn.setAttribute('aria-pressed', String(state.isMuted));
   muteBtn.title = state.isMuted ? 'Ativar microfone' : 'Silenciar microfone';
 
+  deafenBtn.textContent = state.isDeafened ? '🔕' : '🎧';
   deafenBtn.classList.toggle('btn-danger', state.isDeafened);
   deafenBtn.classList.toggle('btn-ghost', !state.isDeafened);
   deafenBtn.setAttribute('aria-pressed', String(state.isDeafened));
   deafenBtn.title = state.isDeafened ? 'Desativar surdina' : 'Ensurdecer';
 
   if (!inVoice) statusEl.textContent = 'Desconectado';
-  else if (state.isDeafened) statusEl.textContent = '🔇 Ensurdecido';
-  else if (state.isMuted) statusEl.textContent = '🎤 Silenciado';
+  else if (state.isDeafened) statusEl.textContent = '🔕 Ensurdecido';
+  else if (state.isMuted) statusEl.textContent = '🔇 Silenciado';
   else statusEl.textContent = '🎧 Em áudio';
 }
 

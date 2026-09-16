@@ -23,12 +23,10 @@ function buildRow(name, purposes, isMe, inVoice, peerId, verified) {
   const avatarWrap = document.createElement('span');
   avatarWrap.className = 'avatar-wrap';
   avatarWrap.appendChild(buildAvatar(name));
-  if (inVoice) {
-    const dot = document.createElement('span');
-    dot.className = 'status-dot status-dot-voice';
-    dot.title = 'No áudio';
-    avatarWrap.appendChild(dot);
-  }
+  const dot = document.createElement('span');
+  dot.className = 'status-dot status-dot-online';
+  dot.title = 'Online';
+  avatarWrap.appendChild(dot);
   row.appendChild(avatarWrap);
 
   const nameEl = document.createElement('span');
@@ -41,6 +39,14 @@ function buildRow(name, purposes, isMe, inVoice, peerId, verified) {
     badge.className = 'verified-badge';
     badge.textContent = '✓';
     badge.title = 'Conta verificada';
+    row.appendChild(badge);
+  }
+
+  if (inVoice) {
+    const badge = document.createElement('span');
+    badge.className = 'voice-badge';
+    badge.textContent = '🎧';
+    badge.title = 'No áudio';
     row.appendChild(badge);
   }
 

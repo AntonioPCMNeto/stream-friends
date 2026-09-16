@@ -3,7 +3,7 @@ import { stopSharing, stopWebcam } from './share.js';
 import { closeAllPeerConnections } from './peers.js';
 import { refreshParticipants } from './participants.js';
 import { showToast } from './toast.js';
-import { clearChat } from './chat.js';
+import { clearChat, setChannelLabel } from './chat.js';
 import { resetVoice } from './voice.js';
 import * as auth from './auth.js';
 import * as rooms from './rooms.js';
@@ -17,6 +17,7 @@ const roomCodeInput = document.getElementById('roomCodeInput');
 const lobbyError = document.getElementById('lobbyError');
 const welcomeBack = document.getElementById('welcomeBack');
 const enterBtn = document.getElementById('enterBtn');
+const roomCodeLabel = document.getElementById('roomCodeLabel');
 const roomCodeDisplay = document.getElementById('roomCodeDisplay');
 const copyRoomCodeBtn = document.getElementById('copyRoomCodeBtn');
 const copyLinkBtn = document.getElementById('copyLinkBtn');
@@ -360,7 +361,7 @@ async function refreshChannels() {
     name.textContent = channel.name;
     row.appendChild(name);
     const activateRow = () => {
-      joinRoom(channel.id, `# ${channel.name}`);
+      joinRoom(channel.id, `#${channel.name}`);
       closeSidebarOnMobile();
     };
     row.addEventListener('click', activateRow);
@@ -473,6 +474,12 @@ function joinRoom(roomId, displayLabel = roomId) {
   window.history.replaceState({}, '', url);
   state.currentRoomUrl = url.href;
   roomCodeDisplay.textContent = displayLabel;
+  // A channel's displayLabel already reads as "#nome" — the "Sala" label
+  // next to it is only useful for a raw guest room code, which has nothing
+  // else identifying it as a room. Discord doesn't prefix its channel names
+  // with a redundant "Channel:" either.
+  roomCodeLabel.classList.toggle('hidden', displayLabel.startsWith('#'));
+  setChannelLabel(displayLabel);
   refreshParticipants();
 
   lobby.style.display = 'none';
