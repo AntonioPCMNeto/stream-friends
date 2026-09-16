@@ -27,6 +27,58 @@ let audioCtx = null;
 const analysers = new Map(); // id -> { source, analyser, data, speaking }
 let monitorHandle = null;
 
+// Local-only noise gate: the browser's own noiseSuppression (see
+// captureMic) handles steady-state hiss/hum fine but does nothing for
+// background bleed while you're simply not talking — this silences the
+// outgoing audio between words instead, using the exact same RMS signal
+// already driving the speaking-ring indicator above. gateOpenUntil is a
+// timestamp, not a bool, so "stay open" is just "now < gateOpenUntil" —
+// every loud tick while talking pushes it forward, and it naturally lapses
+// once you've been quiet for GATE_HANGOVER_MS.
+//
+// Deliberately NOT implemented as track.enabled = false on the real mic
+// track, unlike mute/deafen (see applyMicEnabled) — that would silence the
+// 'local' analyser too (see the comment above), which is exactly the signal
+// this gate needs to detect the next time you speak. Disabling it would
+// make the gate un-reopenable after the first silence, forever. Instead the
+// gate swaps which track is actually attached to each RTCRtpSender: the
+// real (always-enabled, always-analysable) track when open, a permanently
+// silent dummy track when closed. Mute/deafen stay independent and still
+// use track.enabled on the real track — orthogonal to this, and correct
+// either way since a disabled real track is silent whichever track object
+// happens to be attached to the sender.
+const GATE_HANGOVER_MS = 300;
+let gateOpen = false;
+let gateOpenUntil = 0;
+let silentTrack = null;
+
+function getSilentTrack() {
+  if (!silentTrack) silentTrack = ensureAudioCtx().createMediaStreamDestination().stream.getAudioTracks()[0];
+  return silentTrack;
+}
+
+// Re-points every active voice peer connection's outgoing audio at whichever
+// track the current gate state calls for. Also what switchMicDevice calls
+// after capturing a new device, so a mid-call mic swap picks up the gate's
+// current state instead of always going through as "real track" regardless.
+function applyGateToSenders() {
+  const track = gateOpen ? state.micStream?.getAudioTracks()[0] : getSilentTrack();
+  if (!track) return;
+  voicePcs.forEach((pc) => {
+    const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
+    sender?.replaceTrack(track).catch(() => {});
+  });
+}
+
+function updateNoiseGate(isSpeaking, now) {
+  if (isSpeaking) gateOpenUntil = now + GATE_HANGOVER_MS;
+  const shouldBeOpen = now < gateOpenUntil;
+  if (shouldBeOpen !== gateOpen) {
+    gateOpen = shouldBeOpen;
+    applyGateToSenders();
+  }
+}
+
 function ensureAudioCtx() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   audioCtx.resume().catch(() => {});
@@ -36,6 +88,7 @@ function ensureAudioCtx() {
 function startMonitorLoop() {
   if (monitorHandle) return;
   monitorHandle = setInterval(() => {
+    const now = Date.now();
     analysers.forEach((entry, id) => {
       entry.analyser.getByteTimeDomainData(entry.data);
       let sumSquares = 0;
@@ -48,6 +101,7 @@ function startMonitorLoop() {
         entry.speaking = isSpeaking;
         setSpeaking(id, isSpeaking);
       }
+      if (id === 'local') updateNoiseGate(isSpeaking, now);
     });
   }, SPEAKING_POLL_MS);
 }
@@ -220,7 +274,10 @@ function createVoicePc(peerId) {
 function addMicTrack(pc) {
   if (!state.micStream) return;
   if (pc.getSenders().some((s) => s.track && s.track.kind === 'audio')) return;
-  state.micStream.getAudioTracks().forEach((t) => pc.addTrack(t, state.micStream));
+  // Start a brand-new connection already respecting the current gate state
+  // (e.g. joining without having spoken yet) rather than briefly sending the
+  // real track until the next monitor tick corrects it.
+  pc.addTrack(gateOpen ? state.micStream.getAudioTracks()[0] : getSilentTrack());
 }
 
 // Glare-free: of any two peers, only the one with the lexicographically
@@ -324,10 +381,7 @@ async function switchMicDevice(deviceId) {
     currentMicDeviceId = deviceId;
     detachAnalyser('local');
     attachAnalyser('local', stream);
-    voicePcs.forEach((pc) => {
-      const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
-      sender?.replaceTrack(track);
-    });
+    applyGateToSenders(); // picks up the new device's track if the gate's open, or keeps it silenced if not
     previous?.getTracks().forEach((t) => t.stop());
   } catch (err) {
     console.error('Failed to switch microphone:', err);
@@ -413,6 +467,8 @@ function leaveVoice({ silent = false } = {}) {
   state.micStream?.getTracks().forEach((t) => t.stop());
   state.micStream = null;
   detachAnalyser('local');
+  gateOpen = false;
+  gateOpenUntil = 0;
   state.isInVoice = false;
   state.isMuted = false;
   state.isDeafened = false;
