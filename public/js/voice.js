@@ -132,6 +132,37 @@ function detachAnalyser(id) {
   if (analysers.size === 0) stopMonitorLoop();
 }
 
+// Temporary field diagnostic for the "I don't see the speaking ring"
+// report — run `(await import('/js/voice.js')).debugVoiceState()` from the
+// console while talking. Not wired into any UI; safe to leave in, but meant
+// to come back out once this is root-caused.
+export function debugVoiceState() {
+  const local = analysers.get('local');
+  let rms = null;
+  if (local) {
+    local.analyser.getByteTimeDomainData(local.data);
+    let sumSquares = 0;
+    for (let i = 0; i < local.data.length; i++) {
+      const v = (local.data[i] - 128) / 128;
+      sumSquares += v * v;
+    }
+    rms = Math.sqrt(sumSquares / local.data.length);
+  }
+  return {
+    isInVoice: state.isInVoice,
+    isMuted: state.isMuted,
+    isDeafened: state.isDeafened,
+    hasMicStream: Boolean(state.micStream),
+    micTrackReadyState: state.micStream?.getAudioTracks()[0]?.readyState,
+    micTrackEnabled: state.micStream?.getAudioTracks()[0]?.enabled,
+    audioCtxState: audioCtx?.state,
+    hasLocalAnalyser: Boolean(local),
+    currentLocalRms: rms,
+    speakingThreshold: SPEAKING_THRESHOLD,
+    gateOpen,
+  };
+}
+
 const joinBtn = document.getElementById('voiceJoinBtn');
 const activeControls = document.getElementById('voiceActiveControls');
 const connectedBar = document.getElementById('voiceConnectedBar');
