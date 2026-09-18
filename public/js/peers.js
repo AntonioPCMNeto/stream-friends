@@ -239,10 +239,9 @@ function applyStatsSample(key, report, bytesField, note = '') {
 }
 
 // Pulls the active ICE path off a getStats() map: whether media is going
-// direct or **relayed through a TURN server** (the free Open Relay one in
-// iceServers.js is shared and bandwidth-throttled — a relayed path caps
-// throughput hard regardless of the user's real uplink), plus WebRTC's own
-// send-bandwidth estimate and the round-trip time.
+// direct or **relayed through a TURN server** (see iceServers.js — without
+// it a relay-dependent viewer gets no media at all, not just a slow path),
+// plus WebRTC's own send-bandwidth estimate and the round-trip time.
 function activePathInfo(statsMap) {
   let pair = null;
   statsMap.forEach((r) => {

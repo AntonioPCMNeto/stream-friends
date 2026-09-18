@@ -27,6 +27,38 @@ app.get('/config.js', (req, res) => {
   );
 });
 
+// TURN credentials for WebRTC's NAT-traversal fallback (symmetric NATs,
+// CGNAT, restrictive firewalls — anything direct P2P can't get through).
+// Proxies Cloudflare Realtime TURN via Hugging Face's free relay
+// (https://huggingface.co/blog/fastrtc-cloudflare): a free HF account +
+// access token gets 10GB/mo of real TURN relay, no credit card. The HF
+// token is the secret half of that — it stays server-side; only the
+// short-lived Cloudflare credentials this returns reach the client.
+// Without HF_TOKEN configured (see .env.example), every viewer falls back
+// to STUN-only, same as before this existed — direct P2P still works,
+// relayed connections don't.
+const HF_TOKEN = process.env.HF_TOKEN;
+const CLOUDFLARE_FASTRTC_TURN_URL = 'https://turn.fastrtc.org/credentials';
+const STUN_ONLY_FALLBACK = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+app.get('/api/ice-servers', async (req, res) => {
+  if (!HF_TOKEN) return res.json(STUN_ONLY_FALLBACK);
+  try {
+    const response = await fetch(`${CLOUDFLARE_FASTRTC_TURN_URL}?ttl=3600`, {
+      headers: { Authorization: `Bearer ${HF_TOKEN}` },
+    });
+    if (!response.ok) throw new Error(`turn credentials request failed: ${response.status}`);
+    const data = await response.json();
+    if (!Array.isArray(data.iceServers) || data.iceServers.length === 0) {
+      throw new Error('turn credentials response had no iceServers');
+    }
+    res.json(data);
+  } catch (err) {
+    console.error('[ice-servers] falling back to STUN-only:', err.message);
+    res.json(STUN_ONLY_FALLBACK);
+  }
+});
+
 // The web app talks to this server same-origin, so CORS never applies to
 // it — this only matters for the companion Electron desktop client, which
 // loads its page via file:// (no origin to be "same" with) and must
