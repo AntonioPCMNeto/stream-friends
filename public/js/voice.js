@@ -46,7 +46,9 @@ function ensureAudioCtx() {
 // clipping the start of words after a natural speech pause — a structural
 // problem with any hard gate, not a tuning issue. Continuous suppression
 // doesn't have that failure mode at all.
-const RNNOISE_BASE = '/vendor/web-noise-suppressor';
+// Relative to this module, not the site root, so it also resolves under the
+// Electron build's file:// origin.
+const RNNOISE_BASE = new URL('../vendor/web-noise-suppressor', import.meta.url).href;
 let rnnoiseModulePromise = null;
 let rnnoiseWasmBinaryPromise = null;
 let rnnoiseWorkletModuleLoaded = false;

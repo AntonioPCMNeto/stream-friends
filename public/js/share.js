@@ -162,6 +162,10 @@ async function captureDisplay() {
       // source's audio; systemAudio only affects the "Entire Screen" case
       // — 'include' (the default) lets it fall back to whole-system audio there.
       systemAudio: 'include',
+      // Keeps this page's own playback (i.e. the voice-chat peers) out of a
+      // system-audio capture, so viewers don't hear the call in the stream.
+      // Chrome 140+; older browsers ignore unknown constraints.
+      restrictOwnAudio: true,
       // echoCancellation/noiseSuppression/autoGainControl default to browser
       // mic-processing behavior, which can audibly mangle captured system/tab
       // audio (music, game sound). This is display audio, not a microphone.
