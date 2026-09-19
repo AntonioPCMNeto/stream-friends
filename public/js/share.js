@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { renderTiles } from './tiles.js';
-import { callPeer, updateEncodingParams, announceSharingStatus, removeOutgoingTracks, replaceOutgoingStream } from './peers.js';
+import { callPeer, updateEncodingParams, announceSharingStatus, removeOutgoingTracks, replaceOutgoingStream, refreshCaptureThrottle } from './peers.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 import { pickSource } from './screenPicker.js';
@@ -259,6 +259,7 @@ async function startSharing() {
     refreshParticipants();
 
     state.knownPeers.forEach((id) => callPeer(id, 'screen'));
+    refreshCaptureThrottle();
   } catch (err) {
     reportCaptureError(err);
   } finally {
@@ -294,6 +295,7 @@ async function startWebcam() {
     refreshSwitchCameraButton();
 
     state.knownPeers.forEach((id) => callPeer(id, 'webcam'));
+    refreshCaptureThrottle();
   } catch (err) {
     reportCaptureError(err, true);
   } finally {
@@ -314,6 +316,7 @@ async function switchSource() {
     await replaceOutgoingStream('screen', stream);
     state.screenStream = stream;
     renderTiles(); // repoints the local preview
+    refreshCaptureThrottle();
 
     previous.getVideoTracks().forEach((t) => { t.onended = null; });
     previous.getTracks().forEach((t) => t.stop());
@@ -362,6 +365,7 @@ async function switchCamera() {
     state.webcamStream = newStream;
     state.webcamFacing = nextFacing;
     renderTiles();
+    refreshCaptureThrottle();
     showToast('Câmera trocada.');
   } catch (err) {
     console.error('Failed to switch camera:', err);

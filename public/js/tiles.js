@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { setWatching } from './peers.js';
+import { setWatching, refreshCaptureThrottle } from './peers.js';
 
 const videosContainer = document.getElementById('videos');
 const tiles = new Map(); // tile key ('local' or socket id) -> tile <div>
@@ -218,6 +218,7 @@ function createTile(isLocal, key) {
       previewBtn.textContent = on ? '👁' : '🚫';
       previewBtn.title = on ? 'Ocultar prévia' : 'Mostrar prévia';
       previewBtn.setAttribute('aria-label', previewBtn.title);
+      refreshCaptureThrottle();
     };
     setPreview(false);
     previewBtn.onclick = () => setPreview(tile.previewOff);
@@ -255,6 +256,7 @@ function createTile(isLocal, key) {
   infoBtn.onclick = () => {
     const on = tile.classList.toggle('stats-visible');
     infoBtn.setAttribute('aria-pressed', String(on));
+    refreshCaptureThrottle();
   };
   actions.appendChild(infoBtn);
 
@@ -356,6 +358,20 @@ export function renderTiles() {
 // skip stats work nobody is looking at.
 export function isStatsVisible(key) {
   return Boolean(tiles.get(key)?.classList.contains('stats-visible'));
+}
+
+// Whether your own preview of a given purpose ('screen' / 'webcam') is
+// currently turned on. peers.js keeps capturing at full rate only while
+// something (a viewer, or this preview) actually consumes the frames.
+export function isLocalPreviewOn(purpose) {
+  const tile = tiles.get(`local:${purpose}`);
+  return Boolean(tile) && !tile.previewOff;
+}
+
+// Whether the viewer used the per-tile hide toggle on a remote stream.
+// peers.js won't auto-pause/resume a stream the viewer hid on purpose.
+export function isManuallyHidden(key) {
+  return Boolean(tiles.get(key)?.classList.contains('stream-hidden'));
 }
 
 // Updates the small "1280x720 · 30fps · 850kbps" badge shown on a tile.

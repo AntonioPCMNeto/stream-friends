@@ -1,6 +1,6 @@
 import { iceServers } from './iceServers.js';
 import { state } from './state.js';
-import { renderTiles, updateTileStats, isStatsVisible } from './tiles.js';
+import { renderTiles, updateTileStats, isStatsVisible, isLocalPreviewOn, isManuallyHidden } from './tiles.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 
@@ -42,6 +42,86 @@ function localStreamFor(purpose) {
 // watching our screen, or vice versa. Survives source switches and
 // re-offers; cleared when we stop that stream or the peer leaves.
 const pausedViewers = new Set(); // connKey
+
+// HOST SIDE: the connections we offered our own stream on. peerConnections
+// also holds the inbound ones (streams we're watching), so this is what tells
+// "someone is receiving our video" apart from "we're watching someone".
+const outgoingKeys = new Set(); // connKey
+
+// Capture is a fixed cost: the OS capturer copies and scales every frame
+// whether or not anything consumes it (measured ~12% of a core at 720p30, plus
+// steady 3D-engine load). So while no viewer is actually receiving the video —
+// nobody joined yet, or every viewer paused it — capture drops to 1 fps, and
+// goes straight back to the original rate/size the moment something needs
+// frames again. Width/height are re-sent with the frame rate because
+// applyConstraints replaces the whole constraint set.
+const IDLE_CAPTURE_FPS = 1;
+const throttledCapture = new WeakMap(); // video track -> { width, height, frameRate } to restore
+
+function activeViewerCount(purpose) {
+  let count = 0;
+  outgoingKeys.forEach((key) => {
+    if (purposeOfKey(key) === purpose && !pausedViewers.has(key)) count++;
+  });
+  return count;
+}
+
+// Your own preview / stats badge also consume frames, but only while the
+// window can actually be seen.
+function localFramesNeeded(purpose) {
+  return !document.hidden && (isLocalPreviewOn(purpose) || isStatsVisible(`local:${purpose}`));
+}
+
+export function refreshCaptureThrottle() {
+  PURPOSES.forEach((purpose) => {
+    const track = localStreamFor(purpose)?.getVideoTracks()[0];
+    if (!track || track.readyState !== 'live') return;
+    const restore = throttledCapture.get(track);
+    const shouldThrottle = activeViewerCount(purpose) === 0 && !localFramesNeeded(purpose);
+
+    if (shouldThrottle && !restore) {
+      const { width, height, frameRate } = track.getSettings();
+      if (!frameRate || frameRate <= IDLE_CAPTURE_FPS) return;
+      throttledCapture.set(track, { width, height, frameRate });
+      track.applyConstraints({
+        width: { ideal: width },
+        height: { ideal: height },
+        frameRate: { ideal: IDLE_CAPTURE_FPS, max: IDLE_CAPTURE_FPS },
+      }).catch(() => throttledCapture.delete(track));
+    } else if (!shouldThrottle && restore) {
+      throttledCapture.delete(track);
+      track.applyConstraints({
+        width: { ideal: restore.width },
+        height: { ideal: restore.height },
+        frameRate: { ideal: restore.frameRate },
+      }).catch(() => {});
+    }
+  });
+}
+
+// VIEWER SIDE: with our window minimized or fully covered (typically by the
+// game we're playing) nobody can see the video, so ask each sharer to stop
+// sending it to us — the same mechanism as the per-tile hide toggle, so audio
+// keeps flowing and the picture comes straight back when the window does.
+// Picture-in-Picture counts as visible, and a stream the viewer hid on
+// purpose is left alone either way.
+const autoPausedKeys = new Set(); // connKey
+
+function syncViewerVisibility() {
+  const canSee = !document.hidden || Boolean(document.pictureInPictureElement);
+  state.sharingPeers.forEach((purposes, peerId) => {
+    purposes.forEach((purpose) => {
+      if (!PURPOSES.includes(purpose)) return;
+      const key = connKey(peerId, purpose);
+      if (canSee) {
+        if (autoPausedKeys.delete(key)) setWatching(peerId, purpose, true);
+      } else if (!autoPausedKeys.has(key) && !isManuallyHidden(key)) {
+        autoPausedKeys.add(key);
+        setWatching(peerId, purpose, false);
+      }
+    });
+  });
+}
 
 // The sender carrying a given media kind on a connection. Matches on
 // receiver.track too, since after replaceTrack(null) the sender's own track
@@ -115,9 +195,12 @@ function closePeerConnection(peerId, purpose) {
     peerConnections.delete(key);
   }
   pausedViewers.delete(key);
+  outgoingKeys.delete(key);
+  autoPausedKeys.delete(key);
   lastStatsSample.delete(key);
   state.streams.delete(key);
   renderTiles();
+  refreshCaptureThrottle();
 }
 
 function closeConnectionsForPeer(peerId) {
@@ -371,6 +454,8 @@ function measureLocalCaptureFps(purpose) {
 // (whichever currently has the most bytes sent), which naturally avoids a
 // stale/ended sender left behind by a previous share session.
 async function pollStats() {
+  refreshCaptureThrottle(); // safety net for any state change that missed its own trigger
+
   // Minimized or covered by a game: nobody can read the badge or the console,
   // and every getStats() round trip (one per connection) plus the frame
   // counter below is CPU competing with the game. The stream itself doesn't
@@ -460,6 +545,7 @@ export async function callPeer(peerId, purpose) {
   if (!stream) return;
   const key = connKey(peerId, purpose);
   const pc = getOrCreatePeerConnection(peerId, purpose);
+  outgoingKeys.add(key);
   stream.getTracks().forEach((track) => {
     const sender = pc.addTrack(track, stream);
     if (track.kind === 'video') {
@@ -467,6 +553,7 @@ export async function callPeer(peerId, purpose) {
       preferHardwareH264(pc, sender);
     }
   });
+  refreshCaptureThrottle();
   // Peer hid this stream before we (re)connected — offer the m-line but
   // send no video until they un-hide.
   if (pausedViewers.has(key)) {
@@ -534,6 +621,9 @@ export function removeOutgoingTracks(purpose) {
   Array.from(pausedViewers).forEach((key) => {
     if (purposeOfKey(key) === purpose) pausedViewers.delete(key);
   });
+  Array.from(outgoingKeys).forEach((key) => {
+    if (purposeOfKey(key) === purpose) outgoingKeys.delete(key);
+  });
   peerConnections.forEach((pc, key) => {
     if (purposeOfKey(key) !== purpose) return;
     const peerId = peerIdOfKey(key);
@@ -550,6 +640,14 @@ export function initPeerSignaling(theSocket) {
   socket = theSocket;
   setInterval(pollStats, 2000);
 
+  const onVisibilityChange = () => {
+    syncViewerVisibility();
+    refreshCaptureThrottle();
+  };
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  document.addEventListener('enterpictureinpicture', onVisibilityChange, true);
+  document.addEventListener('leavepictureinpicture', onVisibilityChange, true);
+
   // Peers already in the room when we joined. Deliberately silent (no
   // toasts) — this is a one-time dump of everyone already present, not
   // someone actively joining.
@@ -565,6 +663,10 @@ export function initPeerSignaling(theSocket) {
       if (state.isSharingScreen) callPeer(id, 'screen');
       if (state.isSharingWebcam) callPeer(id, 'webcam');
     });
+    // A reconnect gave us a new socket id, so sharers no longer remember what
+    // we paused — start from a clean slate and re-send it if we're hidden.
+    autoPausedKeys.clear();
+    syncViewerVisibility();
     refreshParticipants();
   });
 
@@ -610,9 +712,11 @@ export function initPeerSignaling(theSocket) {
       if (purposes.size === 0) state.sharingPeers.delete(id); else state.sharingPeers.set(id, purposes);
       const key = connKey(id, purpose);
       state.streams.delete(key);
+      autoPausedKeys.delete(key); // the sharer forgets pauses when a share stops
       renderTiles();
       lastStatsSample.delete(key);
     }
+    syncViewerVisibility();
     refreshParticipants();
   });
 
@@ -625,6 +729,7 @@ export function initPeerSignaling(theSocket) {
     const key = connKey(from, purpose);
     if (watching) pausedViewers.delete(key);
     else pausedViewers.add(key);
+    refreshCaptureThrottle();
 
     const sender = senderForKind(peerConnections.get(key), 'video');
     if (!sender) return; // not connected yet — callPeer() will honor pausedViewers
