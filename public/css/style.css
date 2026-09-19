@@ -8,7 +8,8 @@
   --accent: #6366f1;
   --accent-hover: #7577f3;
   --danger: #ff6b6b;
-  --radius: 12px;
+  --speaking: #3ba55d;
+  --radius: 8px;
 }
 
 * { box-sizing: border-box; }
@@ -27,6 +28,7 @@ body {
 }
 
 .app-header {
+  position: relative;
   padding: 28px 32px 20px;
   text-align: center;
   font-size: 26px;
@@ -39,7 +41,41 @@ body {
   text-shadow: 0 2px 24px rgba(99, 102, 241, 0.35);
 }
 
+/* Positioned absolutely (not inline before the title) so the gradient
+   title stays perfectly centered regardless of whether this button is
+   showing. display:none by default — only relevant once #appShell has a
+   sidebar to toggle at narrow widths, see the breakpoint below; the
+   ".hidden" class (toggled in lobby.js for signed-out sessions, which have
+   no sidebar at all) always wins over the media query. Its own color is
+   set explicitly since .app-header's background-clip:text + transparent
+   color would otherwise make it invisible too. */
+.sidebar-toggle-btn {
+  display: none;
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+}
+.sidebar-toggle-btn:hover { color: var(--text); border-color: var(--accent); }
+
+#appShell {
+  display: flex;
+  align-items: flex-start;
+}
+
 main {
+  flex: 1;
+  min-width: 0;
   padding: 0 20px 60px;
 }
 
@@ -90,6 +126,272 @@ main {
 }
 .welcome-back.hidden { display: none; }
 
+/* Optional email/password sign-in (see lobby.js/auth.js) — a small form
+   above the guest fields, or a signed-in status row in its place. One
+   action shows at a time (sign in OR sign up, toggled by authModeToggleBtn)
+   rather than two competing forms. */
+#authForm.hidden { display: none; }
+#authForm .btn { width: 100%; }
+#authUsernameField.hidden { display: none; }
+.btn-link {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  background: none;
+  border: none;
+  color: var(--accent-hover);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+}
+.btn-link:hover { text-decoration: underline; }
+.auth-notice {
+  color: #4ade80;
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+.auth-notice.hidden { display: none; }
+
+.auth-divider {
+  margin: 12px 0 20px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+.auth-divider.hidden { display: none; }
+
+.auth-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+.auth-status.hidden { display: none; }
+
+/* Discord's own leftmost strip — circular server icons for quick switching
+   (see lobby.js's refreshMyServers, which populates both this and the full
+   list below in one pass). Sticky, same convention as #serverSidebar right
+   next to it; hidden together with it below the mobile breakpoint. */
+.server-rail.hidden { display: none; }
+.server-rail {
+  width: 60px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 16px 16px;
+  padding: 8px 0;
+}
+.server-rail-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-radius 0.15s, box-shadow 0.15s;
+}
+.server-rail-icon .avatar { width: 44px; height: 44px; font-size: 16px; border-radius: inherit; }
+.server-rail-icon:hover { border-radius: 16px; }
+.server-rail-icon.active { border-radius: 16px; box-shadow: 0 0 0 2px var(--accent); }
+.server-rail-add {
+  background: var(--surface-2);
+  color: var(--speaking);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.server-rail-add:hover { background: color-mix(in srgb, var(--speaking) 22%, var(--surface-2)); }
+
+/* Persistent servers/channels sidebar for signed-in accounts (see
+   lobby.js/rooms.js) — a permanent fixture of the app shell (both the
+   lobby and inside a room), not just a lobby-card section, so switching
+   channels/servers never means leaving whatever screen you're on. Sticky
+   + its own scroll, same convention as .member-list. */
+#serverSidebar.hidden { display: none; }
+#serverSidebar {
+  width: 260px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 16px 0 16px 16px;
+  padding: 20px 16px;
+}
+#noServerView.hidden { display: none; }
+#channelsView.hidden { display: none; }
+
+.sidebar-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 14px;
+  padding: 0 4px;
+}
+/* Extra breathing room when a second section label (e.g. "Canais de Voz")
+   follows a channel list rather than opening the sidebar. */
+.my-servers-list + .sidebar-section-label { margin-top: 16px; }
+.channels-header { margin-bottom: 14px; }
+.sidebar-server-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sidebar-leave-link.btn-link {
+  display: inline-block;
+  width: auto;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.sidebar-leave-link.btn-link:hover { color: var(--danger); text-decoration: none; }
+.sidebar-server-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  padding: 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Flat, Discord-style list: no boxy borders — a plain row that only
+   distinguishes itself on hover (subtle fill) and when active (tinted
+   fill + a left accent bar). border-left is always present at 3px,
+   just transparent when inactive, so toggling .active never shifts
+   layout. */
+.my-servers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+.my-server-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px 7px 13px;
+  border-left: 3px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text-dim);
+  width: 100%;
+  background: transparent;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.my-server-row:hover { background: var(--surface-2); color: var(--text); }
+.my-server-row.active {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-left-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+/* The actual label text — scoped to its own class rather than every span
+   in the row, since a row can also hold a fixed-size avatar/hash icon
+   that must NOT stretch or ellipsis. */
+.my-server-row .row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.channel-hash {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-weight: 700;
+  font-size: 15px;
+}
+.my-server-row:hover .channel-hash { color: var(--text); }
+.my-server-row.active .channel-hash { color: var(--accent); }
+.channel-voice-icon { flex-shrink: 0; font-size: 13px; }
+
+.channel-delete-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.my-server-row:hover .channel-delete-btn,
+.channel-delete-btn:focus-visible {
+  opacity: 1;
+}
+.channel-delete-btn:hover { background: color-mix(in srgb, var(--danger) 22%, transparent); color: var(--danger); }
+.channel-delete-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* Discord's own "who's in this voice channel" — nested under each voice
+   channel row, live-updated from the server's 'voice-occupancy' broadcast
+   (see lobby.js/server.js) rather than only showing once you've joined. */
+.voice-channel-occupants {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 6px 27px;
+}
+.voice-channel-occupants:empty { display: none; }
+.voice-channel-occupant {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+#createChannelTypeGroup { margin: 4px 4px 10px; }
+
+.no-servers-hint { font-size: 13px; color: var(--text-dim); margin: 0 0 12px; padding: 0 4px; }
+.create-server-form { display: flex; gap: 8px; margin: 4px 4px; }
+.create-server-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: var(--surface-2);
+  color: var(--text);
+}
+.create-server-form input:focus { outline: none; border-color: var(--accent); }
+.auth-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.btn-small { height: 28px; padding: 0 10px; font-size: 12px; }
+
+#guestFields.hidden { display: none; }
+
 .check-updates-btn {
   width: 100%;
   margin-top: 10px;
@@ -118,17 +420,17 @@ main {
 
 /* App screen */
 .room-bar {
-  max-width: 1100px;
+  max-width: 1340px;
   margin: 16px auto 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 20px;
   flex-wrap: wrap;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px 18px;
+  padding: 14px 20px;
 }
 .room-bar-left, .room-bar-right {
   display: flex;
@@ -166,6 +468,7 @@ main {
   letter-spacing: 0.06em;
   color: var(--text-dim);
 }
+.room-code-label.hidden { display: none; }
 .room-code {
   font-size: 18px;
   font-weight: 700;
@@ -188,21 +491,183 @@ main {
 
 .share-control, .participants-control { position: relative; }
 
-.voice-control { display: flex; align-items: center; gap: 8px; }
-/* Icon-only toggles — keep them tight next to the join/leave buttons. */
-#voiceMuteBtn, #voiceDeafenBtn { padding: 0 12px; font-size: 15px; }
+/* Room-bar buttons are icon-only (tooltips carry the label) so the bar
+   doesn't grow every time a new control is added. min-width, not a fixed
+   width, so a button whose content briefly changes (copyLinkBtn's "✅
+   Copiado!") can still grow instead of clipping. */
+.btn-icon { min-width: 38px; padding: 0 10px; font-size: 16px; }
+
+.bar-group { display: flex; align-items: center; gap: 10px; }
+.bar-divider { width: 1px; height: 26px; background: var(--border); flex-shrink: 0; }
+
+/* Distinct from the other ghost icon buttons — voice is an entry point
+   into a whole feature (mic capture, a peer mesh), not a toggle, so it
+   gets its own tint (the same --speaking green already used for voice
+   activity elsewhere) rather than blending into the row. */
+.btn-voice-join {
+  background: color-mix(in srgb, var(--speaking) 16%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--speaking) 45%, var(--border));
+  color: var(--speaking);
+}
+.btn-voice-join:hover {
+  background: color-mix(in srgb, var(--speaking) 28%, var(--surface-2));
+  border-color: var(--speaking);
+  color: var(--text);
+}
+
+/* Everything that only makes sense once you're actually in voice (device
+   picker, mute/deafen/hang-up) reads as one grouped control, not four
+   independent buttons competing with voiceJoinBtn for attention. */
+.voice-active-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+}
+.voice-active-controls.hidden { display: none; }
+.voice-active-controls .btn-icon { height: 32px; min-width: 32px; padding: 0 6px; }
+.voice-active-controls .btn-ghost { border-color: transparent; background: transparent; }
+.voice-active-controls .btn-ghost:hover { background: var(--surface); border-color: transparent; }
+
 .voice-mic-select {
-  height: 38px;
+  height: 32px;
   max-width: 170px;
   padding: 0 8px;
   font-size: 13px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text);
   cursor: pointer;
 }
-.voice-mic-select:focus { outline: none; border-color: var(--accent); }
+.voice-mic-select:focus { outline: none; background: var(--surface); border-color: var(--accent); }
+.voice-mic-select:hover { background: var(--surface); }
+
+/* Persistent bottom-left identity/voice bar (Discord-style, see index.html)
+   — fixed to the viewport rather than laid out in .room-content, so it
+   stays put through scrolling and through server/channel switches. Same
+   260px + 16px-from-edge footprint as #serverSidebar so it lines up under
+   it for signed-in accounts, but it renders for guests too (no sidebar)
+   since mute/deafen are relevant to everyone in a room. */
+.user-bar-wrap {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 40;
+  width: 260px;
+  max-width: calc(100vw - 32px);
+}
+.user-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+/* The "leave" affordance lives here instead of the icon row below, the way
+   Discord separates disconnecting from mute/deafen — keeps that row to 3
+   icons (mute/deafen/settings) instead of 4 at a 260px width. */
+.voice-connected-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: color-mix(in srgb, var(--speaking) 16%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--speaking) 45%, var(--border));
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 6px 8px 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--speaking);
+}
+.voice-connected-bar.hidden { display: none; }
+.voice-connected-bar:not(.hidden) + .user-bar { border-top-left-radius: 0; border-top-right-radius: 0; }
+/* Discord's own "leave call" button — a filled red pill with a phone icon
+   rotated to read as "hang up", not a plain ✕. Always red (not just on
+   hover) since it's the one destructive action in this bar. */
+.voice-disconnect-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: none;
+  background: var(--danger);
+  color: white;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, transform 0.1s;
+}
+.voice-disconnect-btn:hover { background: #f16060; }
+.voice-disconnect-btn:active { transform: scale(0.92); }
+.voice-disconnect-icon { font-size: 12px; line-height: 1; transform: rotate(135deg); }
+
+.user-bar-avatar { flex-shrink: 0; display: inline-flex; }
+.user-bar-avatar .avatar { width: 32px; height: 32px; font-size: 13px; }
+.user-bar-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.user-bar-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-bar-status {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-bar-controls { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.user-bar-controls .btn-icon { height: 30px; min-width: 30px; padding: 0 5px; font-size: 14px; }
+/* Flatten the reused .voice-active-controls/.btn-voice-join pill styling
+   (originally a standalone group in the top room-bar) so the icons sit
+   directly in the user bar instead of showing as a pill-in-a-pill. */
+.user-bar .voice-active-controls { background: transparent; border: none; padding: 0; gap: 2px; }
+.user-bar .btn-voice-join { height: 30px; min-width: 30px; padding: 0; }
+#userBarSettingsBtn[aria-expanded="true"] { background: var(--surface-2); color: var(--text); border-color: var(--accent); }
+
+.user-bar-popover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 10px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+.user-bar-popover.hidden { display: none; }
+.user-bar-popover .voice-mic-select {
+  width: 100%;
+  max-width: none;
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+#userBarSpeakerRow { margin-top: 14px; }
+#userBarSpeakerRow.hidden { display: none; }
+.user-bar-logout-row {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.user-bar-logout-row.hidden { display: none; }
+.user-bar-logout-row .btn-link { margin: 0; color: var(--danger); }
+
+@media (max-width: 420px) {
+  .user-bar-wrap { left: 8px; bottom: 8px; }
+}
 
 /* Floating launcher (not in normal flow — see index.html), same corner the
    chat panel itself opens in; hidden while the panel is open so the two
@@ -293,29 +758,80 @@ main {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 16px;
+  padding: 12px 8px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
-.chat-message { max-width: 90%; }
-.chat-message-own { align-self: flex-end; text-align: right; }
-.chat-message-meta {
-  font-size: 11px;
+/* Discord's own message format — flush-left, no bubble, no distinction for
+   your own messages (Discord doesn't color/align those differently either).
+   Consecutive messages from the same author within GROUP_WINDOW_MS (chat.js)
+   collapse the avatar/name/timestamp header down to just a hover-reveal
+   timestamp in the same gutter column, so the text stays aligned. */
+.chat-message {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 1px 8px;
+  border-radius: 6px;
+}
+.chat-message-grouped { margin-top: 1px; }
+.chat-message:hover { background: var(--surface-2); }
+.chat-message-gutter {
+  width: 32px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding-top: 2px;
+}
+.chat-message-gutter .avatar { width: 32px; height: 32px; font-size: 13px; }
+.chat-message-hover-time {
+  font-size: 10px;
   color: var(--text-dim);
+  opacity: 0;
+  padding-top: 4px;
+  transition: opacity 0.1s;
+}
+.chat-message:hover .chat-message-hover-time { opacity: 1; }
+.chat-message-content { flex: 1; min-width: 0; }
+.avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px transparent;
+  transition: box-shadow 0.15s ease;
+}
+/* Live speaking indicator (Web Audio analyser in voice.js) — a ring around
+   the avatar, the way Discord highlights whoever's talking. A thin 2px ring
+   in the same green as the always-on online dot (.status-dot-online) read
+   as barely-there against the dark card background, so this is a heavier
+   ring plus a soft outer glow to make "talking right now" actually pop
+   instead of blending into "just present". */
+.avatar.speaking {
+  box-shadow: 0 0 0 3px var(--speaking), 0 0 10px 2px color-mix(in srgb, var(--speaking) 65%, transparent);
+}
+.avatar-sm { width: 16px; height: 16px; font-size: 9px; }
+
+.chat-message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   margin-bottom: 2px;
 }
+.chat-message-author { font-weight: 600; font-size: 14px; color: var(--text); }
+.chat-message-time { font-size: 11px; color: var(--text-dim); }
 .chat-message-text {
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: 14px;
+  line-height: 1.45;
   overflow-wrap: break-word;
-  background: var(--surface-2);
-  border-radius: 10px;
-  padding: 7px 11px;
-  display: inline-block;
-  text-align: left;
+  color: var(--text);
 }
-.chat-message-own .chat-message-text { background: var(--accent); color: white; }
 .chat-input-row {
   display: flex;
   gap: 8px;
@@ -384,11 +900,179 @@ main {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
 }
-.voice-badge {
-  font-size: 12px;
-  line-height: 1;
+/* Discord-style presence dot on the avatar itself, replacing a text badge —
+   cut into the avatar via a border matching the row's own background so it
+   reads as "attached to" the avatar rather than floating next to it. */
+.avatar-wrap { position: relative; display: inline-flex; flex-shrink: 0; }
+.status-dot {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+}
+/* Everyone in this list is, by definition, currently connected to the
+   room — there's no persistent roster with an offline state to track, so
+   "online" is the only presence value the data model actually supports.
+   Voice participation is a separate fact and gets its own inline badge
+   (below) rather than recoloring this dot, the way Discord shows a
+   headphone icon next to the name instead of changing the status dot. */
+.status-dot-online { background: var(--speaking); }
+.verified-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #5865f2;
+  background: rgba(88, 101, 242, 0.14);
+  padding: 2px 6px;
+  border-radius: 999px;
   flex-shrink: 0;
 }
+.voice-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--speaking);
+  background: color-mix(in srgb, var(--speaking) 14%, transparent);
+  padding: 2px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.room-content {
+  max-width: 1340px;
+  margin: 24px auto 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+/* Discord-style persistent member list — everyone in the room, docked to
+   the right of the whole app shell (see index.html: a sibling of main and
+   #serverSidebar, not nested in .room-content) instead of hidden behind
+   the 👥 dropdown. A true flex column reserving its own width, exactly
+   mirroring #serverSidebar on the other side — same sticky/scroll/margin
+   pattern, mirrored — is what keeps the room-bar/video area actually
+   centered between the two instead of drifting toward one side. */
+.member-list.hidden { display: none; }
+.member-list {
+  width: 260px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 16px 16px 16px 0;
+  padding: 20px 16px;
+}
+/* .participants-list's own max-height/scroll (below) is sized for the
+   dropdown's limited height — here the outer .member-list already scrolls
+   as a whole, sidebar-style, so let the list grow with it instead of
+   nesting a second scroll region. */
+.member-list .participants-list { max-height: none; overflow-y: visible; }
+
+/* A four-column room (server rail + sidebar + video + member list) needs
+   more room than a two-column layout — below this width the member list
+   gives way to the #participantsBtn dropdown instead, same off-canvas-vs-
+   docked trade #serverSidebar already makes at its own (narrower)
+   breakpoint, since the channel list matters more than the member list. */
+@media (max-width: 1100px) {
+  .member-list { display: none; }
+}
+@media (min-width: 1101px) {
+  .participants-control { display: none; }
+}
+
+/* Below this width the persistent server/channel sidebar can't sit beside
+   the room content without crowding it out, so it becomes an off-canvas
+   drawer instead: fixed, slid out of view, toggled by .sidebar-toggle-btn
+   (see .app-header) via the .open class, with a dimmed backdrop behind it
+   that closes it on click. */
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 45;
+}
+.sidebar-backdrop.hidden { display: none; }
+@media (max-width: 880px) {
+  .sidebar-toggle-btn:not(.hidden) { display: inline-flex; align-items: center; justify-content: center; }
+  /* The rail is now the only way to switch servers (see index.html), so it
+     stays put even here — only the wider channel list becomes an off-canvas
+     drawer, and it overlays the rail (higher z-index, same left edge) when
+     open rather than needing to hide it first. */
+  #serverSidebar:not(.hidden) {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100vh;
+    max-height: 100vh;
+    margin: 0;
+    border-radius: 0;
+    border: none;
+    border-right: 1px solid var(--border);
+    z-index: 46;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  }
+  #serverSidebar.open { transform: translateX(0); }
+}
+
+/* Discord's own "Add a Server" modal — centered, dismissible via backdrop
+   click, replacing the old always-visible "Meus Servidores" list. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-backdrop.hidden { display: none; }
+.modal {
+  width: 420px;
+  max-width: calc(100vw - 40px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 18px;
+}
+.modal-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-tab {
+  flex: 1;
+  padding: 0 0 10px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.modal-tab:hover { color: var(--text); }
+.modal-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.modal-tab-panel.hidden { display: none; }
+.modal-tab-panel .btn { width: 100%; }
 
 .share-panel {
   position: absolute;
@@ -440,8 +1124,8 @@ main {
 
 /* Video grid */
 .video-grid {
-  max-width: 1100px;
-  margin: 24px auto 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 18px;

@@ -38,7 +38,8 @@ let webcamCaptureInFlight = false;
 
 // Wires a row of segmented buttons: clicking one marks it active and
 // updates the group's data-value, which the Start button reads later.
-function initSegmented(group) {
+// Exported for reuse by lobby.js's create-channel type picker.
+export function initSegmented(group) {
   group.querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', () => {
       group.querySelectorAll('button').forEach((b) => {
@@ -60,7 +61,9 @@ function setScreenShareUI(sharing) {
 }
 
 function setWebcamUI(sharing) {
-  webcamBtn.textContent = sharing ? '⏹ Parar Webcam' : '📷 Compartilhar Webcam';
+  webcamBtn.textContent = sharing ? '⏹' : '📷';
+  webcamBtn.title = sharing ? 'Parar Webcam' : 'Compartilhar Webcam';
+  webcamBtn.setAttribute('aria-label', webcamBtn.title);
   webcamBtn.classList.toggle('btn-danger', sharing);
   webcamBtn.classList.toggle('btn-ghost', !sharing);
   if (!sharing) switchCameraBtn.classList.add('hidden');

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://stream-friends.onrender.com wss://stream-friends.onrender.com;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://stream-friends.onrender.com wss://stream-friends.onrender.com https://jaerxfcfkwsgtypzneqe.supabase.co wss://jaerxfcfkwsgtypzneqe.supabase.co;">
   <title>Scrima aí</title>
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
   <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
@@ -11,16 +11,127 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <header class="app-header">🖥️ Scrima aí v0.12</header>
+  <header class="app-header">
+    <button id="sidebarToggleBtn" class="sidebar-toggle-btn" aria-label="Mostrar servidores" aria-expanded="false">☰</button>
+    🖥️ Scrima aí v0.12
+  </header>
 
-  <main>
+  <div id="appShell">
+    <!-- Discord's own leftmost strip — circular server icons, the only way
+         to switch servers (no redundant list in #serverSidebar, which just
+         shows the selected server's channels). Stays visible at every width,
+         including below the sidebar's own off-canvas breakpoint (see
+         style.css), where the channel list becomes a drawer but the rail
+         doesn't. -->
+    <nav id="serverRail" class="server-rail hidden"></nav>
+    <aside id="serverSidebar" class="hidden">
+      <div id="noServerView">
+        <div class="sidebar-section-label">Servidores</div>
+        <p class="no-servers-hint">Crie ou entre em um servidor pelo botão + no menu à esquerda.</p>
+      </div>
+
+      <div id="channelsView" class="hidden">
+        <div class="channels-header">
+          <div class="sidebar-server-row">
+            <div id="selectedServerName" class="sidebar-server-name"></div>
+            <button id="leaveServerBtn" type="button" class="btn-link sidebar-leave-link" title="Sair do servidor">Sair</button>
+          </div>
+        </div>
+
+        <div class="sidebar-section-label">Canais de Texto</div>
+        <div id="textChannelsList" class="my-servers-list"></div>
+
+        <div class="sidebar-section-label">Canais de Voz</div>
+        <div id="voiceChannelsList" class="my-servers-list"></div>
+
+        <div id="createChannelTypeGroup" class="segmented" data-value="text" role="group" aria-label="Tipo de canal">
+          <button type="button" data-value="text" class="active" aria-pressed="true"># Texto</button>
+          <button type="button" data-value="voice" aria-pressed="false">🔊 Voz</button>
+        </div>
+        <div class="create-server-form">
+          <input id="createChannelNameInput" type="text" placeholder="Nome do novo canal" maxlength="40">
+          <button id="createChannelBtn" class="btn btn-ghost btn-small">+ Criar</button>
+        </div>
+        <p id="createChannelError" class="error"></p>
+      </div>
+    </aside>
+    <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
+
+    <!-- Discord's own "Add a Server" modal — triggered by the rail's +
+         button. Two tabs (create vs. join-by-code) instead of the old
+         always-visible "Meus Servidores" list, which just duplicated what
+         the rail icons already do. -->
+    <div id="serverModalBackdrop" class="modal-backdrop hidden">
+      <div id="serverModal" class="modal" role="dialog" aria-modal="true" aria-label="Adicionar servidor">
+        <div class="modal-header">
+          <span>Adicionar um servidor</span>
+          <button id="serverModalCloseBtn" class="chat-close-btn" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-tabs" role="tablist">
+          <button type="button" id="serverModalCreateTabBtn" class="modal-tab active" role="tab" aria-selected="true">Criar servidor</button>
+          <button type="button" id="serverModalJoinTabBtn" class="modal-tab" role="tab" aria-selected="false">Entrar com código</button>
+        </div>
+
+        <div id="serverModalCreatePanel" class="modal-tab-panel">
+          <label class="field">
+            <span>Nome do servidor</span>
+            <input id="createServerNameInput" type="text" placeholder="ex.: Paunocuzitos" maxlength="40">
+          </label>
+          <p id="createServerError" class="error"></p>
+          <button id="createServerBtn" class="btn btn-primary">Criar servidor</button>
+        </div>
+
+        <div id="serverModalJoinPanel" class="modal-tab-panel hidden">
+          <label class="field">
+            <span>Código do convite</span>
+            <input id="joinServerCodeInput" type="text" placeholder="Cole o código aqui" maxlength="40">
+          </label>
+          <p id="joinServerError" class="error"></p>
+          <button id="joinServerBtn" class="btn btn-primary">Entrar no servidor</button>
+        </div>
+      </div>
+    </div>
+
+    <main>
     <div id="lobby" class="card">
-      <h2>Entre em uma sala</h2>
+      <h2>Entre na sua conta</h2>
+
+      <div id="authStatus" class="auth-status hidden">
+        <span id="authAvatar" class="auth-avatar-wrap"></span>
+        <span id="authName" class="auth-name"></span>
+        <button id="signOutBtn" class="btn btn-ghost btn-small">Sair</button>
+      </div>
+
+      <p id="authDividerServers" class="auth-divider hidden">ou entre com um código</p>
+
+      <div id="authForm" class="hidden">
+        <label class="field">
+          <span>E-mail</span>
+          <input id="authEmail" type="email" placeholder="voce@exemplo.com">
+        </label>
+        <label class="field hidden" id="authUsernameField">
+          <span>Nome de usuário</span>
+          <input id="authUsername" type="text" placeholder="ex.: João" maxlength="30">
+        </label>
+        <label class="field">
+          <span>Senha</span>
+          <input id="authPassword" type="password" placeholder="••••••••">
+        </label>
+        <p id="authError" class="error"></p>
+        <p id="authNotice" class="auth-notice hidden"></p>
+        <button id="authSignInBtn" class="btn btn-primary">Entrar</button>
+        <button id="authSignUpBtn" class="btn btn-primary hidden">Criar conta</button>
+        <button id="authModeToggleBtn" type="button" class="btn-link">Não tem conta? Criar uma</button>
+      </div>
+      <p id="authDivider" class="auth-divider hidden">ou continue como convidado</p>
+
       <p id="welcomeBack" class="welcome-back hidden"></p>
-      <label class="field">
-        <span>Seu Nick</span>
-        <input id="usernameInput" type="text" placeholder="ex.: João" maxlength="30">
-      </label>
+      <div id="guestFields">
+        <label class="field">
+          <span>Seu Nick</span>
+          <input id="usernameInput" type="text" placeholder="ex.: João" maxlength="30">
+        </label>
+      </div>
       <label class="field">
         <span>Código da Sala</span>
         <input id="roomCodeInput" type="text" placeholder="Deixe em branco para criar uma sala" maxlength="30">
@@ -36,38 +147,39 @@
         <div class="room-bar-left">
           <span id="connectionDot" class="connection-dot disconnected" title="Conectando..."></span>
           <span class="room-code-wrap">
-            <span class="room-code-label">Sala</span>
+            <span id="roomCodeLabel" class="room-code-label">Sala</span>
             <span id="roomCodeDisplay" class="room-code"></span>
             <button id="copyRoomCodeBtn" class="copy-code-btn" title="Copiar código da sala" aria-label="Copiar código da sala">📋</button>
           </span>
         </div>
 
         <div class="room-bar-right">
-          <div class="participants-control">
-            <button id="participantsBtn" class="btn btn-ghost">👥 <span id="participantsCount">0</span></button>
+          <div class="bar-group">
+            <button id="startWebcamBtn" class="btn btn-ghost btn-icon" title="Compartilhar Webcam" aria-label="Compartilhar Webcam">📷</button>
+            <button id="switchCameraBtn" class="btn btn-ghost btn-icon hidden" title="Trocar câmera" aria-label="Trocar câmera">🔄</button>
+          </div>
 
-            <div id="participantsPanel" class="participants-panel hidden">
-              <div class="field-label">Participantes</div>
-              <div id="participantsList" class="participants-list"></div>
+          <span class="bar-divider"></span>
+
+          <div class="bar-group">
+            <div class="participants-control">
+              <button id="participantsBtn" class="btn btn-ghost btn-icon" title="Participantes" aria-label="Participantes">👥 <span id="participantsCount">0</span></button>
+
+              <div id="participantsPanel" class="participants-panel hidden">
+                <div class="field-label">Participantes</div>
+                <div id="participantsList" class="participants-list"></div>
+              </div>
             </div>
+
+            <button id="copyLinkBtn" class="btn btn-ghost btn-icon" title="Copiar link" aria-label="Copiar link">🔗</button>
           </div>
 
-          <button id="copyLinkBtn" class="btn btn-ghost">🔗 Copiar link</button>
+          <span class="bar-divider"></span>
 
-          <button id="startWebcamBtn" class="btn btn-ghost">📷 Compartilhar Webcam</button>
-          <button id="switchCameraBtn" class="btn btn-ghost hidden">🔄 Trocar câmera</button>
-
-          <div class="voice-control">
-            <button id="voiceJoinBtn" class="btn btn-ghost">🎧 Entrar no áudio</button>
-            <select id="voiceMicSelect" class="voice-mic-select hidden" title="Microfone" aria-label="Microfone"></select>
-            <button id="voiceMuteBtn" class="btn btn-ghost hidden" aria-pressed="false" title="Silenciar microfone">🎤</button>
-            <button id="voiceDeafenBtn" class="btn btn-ghost hidden" aria-pressed="false" title="Ensurdecer">🎧</button>
-            <button id="voiceLeaveBtn" class="btn btn-ghost hidden">📞 Sair do áudio</button>
-          </div>
-
-          <div class="share-control">
-            <button id="startShareBtn" class="btn btn-primary">🖥️ Iniciar Compartilhamento</button>
-            <button id="switchSourceBtn" class="btn btn-ghost hidden">🔄 Trocar tela</button>
+          <div class="bar-group">
+            <div class="share-control">
+              <button id="startShareBtn" class="btn btn-primary">🖥️ Iniciar Compartilhamento</button>
+              <button id="switchSourceBtn" class="btn btn-ghost btn-icon hidden" title="Trocar tela" aria-label="Trocar tela">🔄</button>
 
             <div id="sharePanel" class="share-panel hidden">
               <div class="control-group">
@@ -105,13 +217,60 @@
               </div>
               <button id="confirmShareBtn" class="btn btn-primary">🖥️ Compartilhar</button>
             </div>
-          </div>
+            </div>
 
-          <button id="leaveRoomBtn" class="btn btn-ghost">🚪 Sair da Sala</button>
+            <button id="leaveRoomBtn" class="btn btn-ghost btn-icon" title="Sair da Sala" aria-label="Sair da Sala">🚪</button>
+          </div>
         </div>
       </div>
 
-      <div id="videos" class="video-grid"></div>
+      <!-- Persistent bottom-left identity/voice bar, Discord-style — fixed to
+           the viewport (not part of .room-content's flow) so it stays put
+           regardless of scroll or which server/channel view is open. Lives
+           for both guests and signed-in accounts (unlike #serverSidebar,
+           which is account-only), since mute/deafen matter to everyone once
+           inside a room. -->
+      <div id="userBarWrap" class="user-bar-wrap">
+        <!-- Only shown while connected — mirrors Discord's own "leave this
+             voice channel" affordance living apart from mute/deafen, which
+             keeps the main row below down to 3 icons instead of 4. -->
+        <div id="voiceConnectedBar" class="voice-connected-bar hidden">
+          <span>🎧 No áudio</span>
+          <button id="voiceLeaveBtn" class="voice-disconnect-btn" title="Sair do áudio" aria-label="Sair do áudio"><span class="voice-disconnect-icon">📞</span></button>
+        </div>
+        <div id="userBar" class="user-bar">
+          <div id="userBarPopover" class="user-bar-popover hidden">
+            <div class="field-label">Microfone</div>
+            <select id="voiceMicSelect" class="voice-mic-select" aria-label="Microfone"></select>
+
+            <div id="userBarSpeakerRow" class="hidden">
+              <div class="field-label">Saída de áudio</div>
+              <select id="voiceSpeakerSelect" class="voice-mic-select" aria-label="Saída de áudio"></select>
+            </div>
+
+            <div id="userBarLogoutRow" class="user-bar-logout-row hidden">
+              <button id="userBarLogoutBtn" type="button" class="btn-link">Sair da conta</button>
+            </div>
+          </div>
+          <span id="userBarAvatar" class="user-bar-avatar"></span>
+          <div class="user-bar-info">
+            <span id="userBarName" class="user-bar-name"></span>
+            <span id="userBarStatus" class="user-bar-status">Desconectado</span>
+          </div>
+          <div class="user-bar-controls">
+            <button id="voiceJoinBtn" class="btn btn-voice-join btn-icon" title="Entrar no áudio" aria-label="Entrar no áudio">🎧</button>
+            <div id="voiceActiveControls" class="voice-active-controls hidden">
+              <button id="voiceMuteBtn" class="btn btn-ghost btn-icon" aria-pressed="false" title="Silenciar microfone">🎤</button>
+              <button id="voiceDeafenBtn" class="btn btn-ghost btn-icon" aria-pressed="false" title="Ensurdecer">🎧</button>
+            </div>
+            <button id="userBarSettingsBtn" class="btn btn-ghost btn-icon" title="Configurações" aria-label="Configurações" aria-expanded="false" aria-haspopup="true">⚙️</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="room-content">
+        <div id="videos" class="video-grid"></div>
+      </div>
 
       <!-- Floating launcher, not part of the room bar — chat is a separate,
            always-reachable corner of the screen rather than one more item
@@ -136,7 +295,24 @@
         </div>
       </div>
     </div>
-  </main>
+    </main>
+
+    <!-- Persistent Discord-style member list — everyone in the room, not
+         just voice (each row already carries a 🎧 badge + speaking ring
+         when applicable, see participants.js). A true flex sibling of
+         #serverSidebar/main (not nested inside .room-content) so it reserves
+         its own layout space the same way the sidebar does on the left —
+         that's what keeps the room-bar/video area actually centered between
+         them instead of drifting left. lobby.js toggles the JS-driven
+         .hidden alongside #appScreen's own show/hide (only relevant in a
+         room); the width-driven breakpoint below is separate — narrower
+         viewports fall back to the #participantsPanel dropdown instead
+         (see .participants-control). -->
+    <aside id="memberList" class="member-list hidden">
+      <div class="field-label">Participantes</div>
+      <div id="memberListItems" class="participants-list"></div>
+    </aside>
+  </div>
 
   <footer class="app-footer">Em homenagem ao meu amigo Lucas Demétrio</footer>
 
@@ -146,6 +322,11 @@
        loads via file:// inside Electron) — js/main.js connects it straight
        to the deployed signaling server. -->
   <script src="vendor/socket.io.min.js"></script>
+  <!-- Public Supabase config (a static copy of what server.js serves at
+       /config.js) and a bundled supabase-js — the CSP below forbids loading
+       either from a remote origin. auth.js picks up window.supabase. -->
+  <script src="config.js"></script>
+  <script src="vendor/supabase.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

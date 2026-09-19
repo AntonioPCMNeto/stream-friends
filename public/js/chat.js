@@ -1,3 +1,5 @@
+import { buildAvatar, colorForName } from './identity.js';
+
 const MAX_MESSAGE_LENGTH = 500;
 
 const toggleBtn = document.getElementById('chatToggleBtn');
@@ -11,6 +13,20 @@ const sendBtn = document.getElementById('chatSendBtn');
 
 let socket = null;
 let unreadCount = 0;
+
+// Which channel's messages the panel is showing/sending to — normally the
+// room you're actually in, but can point at a different channel while
+// staying connected there (see lobby.js's peekChannelChat). Messages for
+// any other channel (e.g. your own room's chat while peeking elsewhere) are
+// just ignored, not queued — there's no per-channel unread tracking here,
+// only "did I miss something in the channel I'm currently looking at".
+let viewingChannelId = null;
+
+// Consecutive messages from the same author within this window are grouped
+// Discord-style — one avatar/name/timestamp header, the rest just text.
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
+let lastAuthor = null;
+let lastMessageTs = 0;
 
 function isOpen() { return !panel.classList.contains('hidden'); }
 
@@ -36,32 +52,89 @@ function closePanel() {
   launcher.classList.remove('hidden');
 }
 
+// Called from lobby.js on every entry/channel switch AND every peek at a
+// different channel's chat (see peekChannelChat) — points the panel at
+// channelId and relabels the input Discord-style ("Enviar mensagem para
+// #canal"). Clears the pane rather than trying to keep scrollback per
+// channel, since the server doesn't persist messages anyway — there's
+// nothing to restore when you peek back later regardless.
+export function setViewingChannel(channelId, label) {
+  viewingChannelId = channelId;
+  input.placeholder = `Enviar mensagem para ${label}`;
+  messagesEl.innerHTML = '';
+  lastAuthor = null;
+  lastMessageTs = 0;
+}
+
+// Discord opens straight to the channel you clicked — used by
+// peekChannelChat so glancing at a channel while in voice doesn't leave you
+// staring at a closed launcher bubble.
+export function openPanelIfClosed() {
+  if (!isOpen()) openPanel();
+}
+
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function appendMessage(username, text, ts, isOwn) {
-  const row = document.createElement('div');
-  row.className = isOwn ? 'chat-message chat-message-own' : 'chat-message';
+function appendMessage(username, text, ts) {
+  const grouped = username === lastAuthor && ts - lastMessageTs < GROUP_WINDOW_MS;
+  lastAuthor = username;
+  lastMessageTs = ts;
 
-  const meta = document.createElement('div');
-  meta.className = 'chat-message-meta';
-  meta.textContent = `${username} · ${formatTime(ts)}`;
-  row.appendChild(meta);
+  const row = document.createElement('div');
+  row.className = grouped ? 'chat-message chat-message-grouped' : 'chat-message';
+
+  // Fixed-width gutter either way, so grouped rows' text lines up under the
+  // headed row's text instead of shifting left — Discord shows the
+  // timestamp here on hover for a grouped message instead of an avatar.
+  const gutter = document.createElement('div');
+  gutter.className = 'chat-message-gutter';
+  if (grouped) {
+    const hoverTime = document.createElement('span');
+    hoverTime.className = 'chat-message-hover-time';
+    hoverTime.textContent = formatTime(ts);
+    gutter.appendChild(hoverTime);
+  } else {
+    gutter.appendChild(buildAvatar(username));
+  }
+  row.appendChild(gutter);
+
+  const content = document.createElement('div');
+  content.className = 'chat-message-content';
+
+  if (!grouped) {
+    const meta = document.createElement('div');
+    meta.className = 'chat-message-meta';
+
+    const authorEl = document.createElement('span');
+    authorEl.className = 'chat-message-author';
+    authorEl.style.color = colorForName(username);
+    authorEl.textContent = username;
+    meta.appendChild(authorEl);
+
+    const timeEl = document.createElement('span');
+    timeEl.className = 'chat-message-time';
+    timeEl.textContent = formatTime(ts);
+    meta.appendChild(timeEl);
+
+    content.appendChild(meta);
+  }
 
   const body = document.createElement('div');
   body.className = 'chat-message-text';
   body.textContent = text;
-  row.appendChild(body);
+  content.appendChild(body);
 
+  row.appendChild(content);
   messagesEl.appendChild(row);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 function sendMessage() {
   const text = input.value.trim().slice(0, MAX_MESSAGE_LENGTH);
-  if (!text) return;
-  socket.emit('chat-message', { text });
+  if (!text || !viewingChannelId) return;
+  socket.emit('chat-message', { channelId: viewingChannelId, text });
   input.value = '';
 }
 
@@ -71,13 +144,17 @@ export function clearChat() {
   messagesEl.innerHTML = '';
   setUnread(0);
   closePanel();
+  lastAuthor = null;
+  lastMessageTs = 0;
+  viewingChannelId = null;
 }
 
 export function initChat(theSocket) {
   socket = theSocket;
 
-  socket.on('chat-message', ({ from, username, text, ts }) => {
-    appendMessage(username, text, ts, from === socket.id);
+  socket.on('chat-message', ({ channelId, username, text, ts }) => {
+    if (channelId !== viewingChannelId) return; // e.g. your own room's chat arriving while you're peeking elsewhere
+    appendMessage(username, text, ts);
     if (!isOpen()) setUnread(unreadCount + 1);
   });
 

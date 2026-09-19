@@ -2,6 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 process.env.PORT = '3999';
+// Hermetic regardless of a local .env — these tests must never depend on
+// real network calls to Supabase (slow, flaky, and requires credentials
+// that won't exist in CI). Set (not deleted) *before* requiring server.js:
+// dotenv.config() only fills in vars that are still undefined, so a
+// same-process .env load can't override these back to real values.
+process.env.SUPABASE_URL = '';
+process.env.SUPABASE_ANON_KEY = '';
 const { server, io } = require('../server');
 const { io: ioc } = require('socket.io-client');
 
@@ -73,6 +80,164 @@ test('join-room rejects an empty room id or username', async () => {
 
   assert.strictEqual(timedOut, false, 'invalid join-room payloads must not be accepted');
   socket.close();
+});
+
+test('joining with the same clientId evicts the previous connection instead of duplicating it', async () => {
+  const first = await connect();
+  const bystander = await connect();
+
+  first.emit('join-room', { roomId: 'room-d', username: 'Totonho', clientId: 'device-1' });
+  bystander.emit('join-room', { roomId: 'room-d', username: 'Bystander' });
+  await wait(100);
+  const firstId = first.id; // socket.io-client clears .id once 'disconnect' fires below
+
+  const firstDisconnected = new Promise((resolve) => first.once('disconnect', resolve));
+  const bystanderSawPeerLeft = new Promise((resolve) => bystander.once('peer-left', resolve));
+
+  const second = await connect();
+  const existingPeersReceived = new Promise((resolve) => second.once('existing-peers', resolve));
+  second.emit('join-room', { roomId: 'room-d', username: 'Totonho', clientId: 'device-1' });
+
+  const [, leftId, peers] = await Promise.all([firstDisconnected, bystanderSawPeerLeft, existingPeersReceived]);
+
+  assert.strictEqual(leftId, firstId, 'the stale connection for the same clientId must be evicted');
+  assert.strictEqual(peers.length, 1, 'only the bystander should remain, not a stale copy of Totonho');
+  assert.strictEqual(peers[0].username, 'Bystander');
+
+  bystander.close();
+  second.close();
+});
+
+test('join-room with a bogus access token still succeeds as an unverified guest', async () => {
+  const first = await connect();
+  first.emit('join-room', { roomId: 'room-e', username: 'Guest', accessToken: 'not-a-real-token' });
+  await wait(100);
+
+  const second = await connect();
+  const existingPeersReceived = new Promise((resolve) => second.once('existing-peers', resolve));
+  second.emit('join-room', { roomId: 'room-e', username: 'Bystander' });
+  const peers = await existingPeersReceived;
+
+  assert.strictEqual(peers.length, 1, 'the bogus-token join must still have succeeded, not been dropped');
+  assert.strictEqual(peers[0].username, 'Guest', 'an unverifiable token must not override the typed username');
+  assert.strictEqual(peers[0].verified, false, 'an unverifiable token must not be trusted as an account');
+
+  first.close();
+  second.close();
+});
+
+test('chat-message reaches only sockets viewing that channel', async () => {
+  const alice = await connect();
+  const bob = await connect();
+
+  alice.emit('join-room', { roomId: 'chat-room-a', username: 'Alice' });
+  bob.emit('join-room', { roomId: 'chat-room-b', username: 'Bob' }); // a different room entirely
+  await wait(100);
+
+  let bobReceived = false;
+  bob.on('chat-message', () => { bobReceived = true; });
+
+  alice.emit('chat-message', { channelId: 'chat-room-a', text: 'hello' });
+  await wait(150);
+
+  assert.strictEqual(bobReceived, false, 'a message for a channel Bob never joined/viewed must not reach him');
+
+  alice.close();
+  bob.close();
+});
+
+test('chat-message is echoed to the sender and carries the channelId', async () => {
+  const alice = await connect();
+  alice.emit('join-room', { roomId: 'chat-room-c', username: 'Alice' });
+  await wait(100);
+
+  const received = new Promise((resolve) => alice.once('chat-message', resolve));
+  alice.emit('chat-message', { channelId: 'chat-room-c', text: 'hi there' });
+  const msg = await received;
+
+  assert.strictEqual(msg.channelId, 'chat-room-c');
+  assert.strictEqual(msg.text, 'hi there');
+  assert.strictEqual(msg.username, 'Alice');
+
+  alice.close();
+});
+
+test('view-channel lets a socket read a channel it never entered via join-room', async () => {
+  const alice = await connect();
+  const bob = await connect();
+
+  // Both in the same voice room, but the chat they're peeking at lives
+  // entirely outside it — the whole point of view-channel.
+  alice.emit('join-room', { roomId: 'voice-room', username: 'Alice' });
+  bob.emit('join-room', { roomId: 'voice-room', username: 'Bob' });
+  await wait(100);
+
+  alice.emit('view-channel', { channelId: 'text-room' });
+  bob.emit('view-channel', { channelId: 'text-room' });
+  await wait(50);
+
+  const bobReceived = new Promise((resolve) => bob.once('chat-message', resolve));
+  alice.emit('chat-message', { channelId: 'text-room', text: 'peeking works' });
+
+  const msg = await bobReceived;
+  assert.strictEqual(msg.text, 'peeking works');
+
+  alice.close();
+  bob.close();
+});
+
+test('view-channel replaces a previous peek but keeps the socket\'s own room chat', async () => {
+  const alice = await connect();
+  alice.emit('join-room', { roomId: 'own-room-x', username: 'Alice' });
+  await wait(100);
+
+  alice.emit('view-channel', { channelId: 'peek-1-x' });
+  await wait(50);
+  alice.emit('view-channel', { channelId: 'peek-2-x' }); // drops peek-1-x, keeps own-room-x, adds peek-2-x
+  await wait(50);
+
+  const senderPeek1 = await connect();
+  senderPeek1.emit('join-room', { roomId: 'peek-1-x', username: 'SenderPeek1' });
+  const senderPeek2 = await connect();
+  senderPeek2.emit('join-room', { roomId: 'peek-2-x', username: 'SenderPeek2' });
+  const senderOwn = await connect();
+  senderOwn.emit('join-room', { roomId: 'own-room-x', username: 'SenderOwn' });
+  await wait(100);
+
+  const received = [];
+  alice.on('chat-message', (msg) => received.push(msg.channelId));
+
+  senderPeek1.emit('chat-message', { channelId: 'peek-1-x', text: 'stale peek' });
+  senderPeek2.emit('chat-message', { channelId: 'peek-2-x', text: 'current peek' });
+  senderOwn.emit('chat-message', { channelId: 'own-room-x', text: 'own room still works' });
+  await wait(150);
+
+  assert.ok(!received.includes('peek-1-x'), 'a dropped peek must not still deliver messages');
+  assert.ok(received.includes('peek-2-x'), 'the current peek must deliver messages');
+  assert.ok(received.includes('own-room-x'), "the socket's own entered room chat must keep working while peeking elsewhere");
+
+  alice.close();
+  senderPeek1.close();
+  senderPeek2.close();
+  senderOwn.close();
+});
+
+test('chat-message is rejected from a socket that never joined or viewed that channel', async () => {
+  const eve = await connect();
+  const bystander = await connect();
+  bystander.emit('join-room', { roomId: 'guarded-room', username: 'Bystander' });
+  await wait(100);
+
+  let bystanderReceived = false;
+  bystander.on('chat-message', () => { bystanderReceived = true; });
+
+  eve.emit('chat-message', { channelId: 'guarded-room', text: 'uninvited' });
+  await wait(150);
+
+  assert.strictEqual(bystanderReceived, false, 'a socket with no join-room/view-channel for this channel must not be able to post into it');
+
+  eve.close();
+  bystander.close();
 });
 
 test.after(() => {
