@@ -161,6 +161,10 @@ async function captureDisplay() {
   // audio (music, game sound). This is display audio, not a microphone.
   const audioProcessing = {
     systemAudio: 'include',
+    // Keeps this page's own playback (i.e. the voice-chat peers) out of a
+    // system-audio capture, so viewers don't hear the call in the stream.
+    // Chrome 140+ / Electron 44.4+; older engines ignore unknown constraints.
+    restrictOwnAudio: true,
     echoCancellation: false,
     noiseSuppression: false,
     autoGainControl: false,
