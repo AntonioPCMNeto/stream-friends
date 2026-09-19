@@ -49,6 +49,7 @@ const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 const noServerView = document.getElementById('noServerView');
 const channelsView = document.getElementById('channelsView');
 const leaveServerBtn = document.getElementById('leaveServerBtn');
+const inviteServerBtn = document.getElementById('inviteServerBtn');
 const selectedServerName = document.getElementById('selectedServerName');
 const textChannelsList = document.getElementById('textChannelsList');
 const voiceChannelsList = document.getElementById('voiceChannelsList');
@@ -151,6 +152,66 @@ function saveServerId(roomId) {
     localStorage.setItem(SERVER_STORAGE_KEY, roomId);
   } catch {
     // Ignore — persistence is a nice-to-have.
+  }
+}
+
+// A server invite is just the server's id (see rooms.js's join_room_by_invite).
+// An invite link carries it as ?invite=; opening one stores it here until the
+// visitor is signed in, so it survives sign-up, email confirmation and reloads
+// instead of being lost if they weren't signed in yet.
+const INVITE_STORAGE_KEY = 'scrimaAi.pendingInvite';
+// The desktop build loads via file://, which is no use to a friend receiving
+// a link — its invites point at the web app instead.
+const WEB_APP_URL = 'https://stream-friends.onrender.com';
+
+function loadPendingInvite() {
+  try {
+    return localStorage.getItem(INVITE_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function savePendingInvite(code) {
+  try {
+    localStorage.setItem(INVITE_STORAGE_KEY, code);
+  } catch {
+    // Ignore — the invite just won't survive a reload.
+  }
+}
+
+function clearPendingInvite() {
+  try {
+    localStorage.removeItem(INVITE_STORAGE_KEY);
+  } catch {
+    // Ignore.
+  }
+}
+
+function buildInviteLink(serverId) {
+  const base = window.location.protocol === 'file:'
+    ? WEB_APP_URL
+    : window.location.origin + window.location.pathname;
+  return `${base}?invite=${encodeURIComponent(serverId)}`;
+}
+
+// The join dialog accepts either the bare code or a whole pasted invite link.
+function parseInviteCode(input) {
+  try {
+    const url = new URL(input);
+    return url.searchParams.get('invite') || url.searchParams.get('room') || input;
+  } catch {
+    return input;
+  }
+}
+
+{
+  const url = new URL(window.location.href);
+  const invite = url.searchParams.get('invite');
+  if (invite) {
+    savePendingInvite(invite.slice(0, 100));
+    url.searchParams.delete('invite');
+    window.history.replaceState({}, '', url);
   }
 }
 
@@ -296,6 +357,25 @@ async function refreshMyServers() {
   const savedId = loadSavedServerId();
   const target = myRooms.find((room) => room.id === savedId) || myRooms[myRooms.length - 1];
   openServerChannels(target);
+}
+
+// Joins the server from a pending invite link, if there is one, and makes it
+// the selected server so refreshMyServers lands on it. Guarded because
+// Supabase's auth listener can trigger applyAuthUX several times in a row.
+let inviteInFlight = false;
+async function acceptPendingInvite() {
+  const code = loadPendingInvite();
+  if (!code || inviteInFlight) return;
+  inviteInFlight = true;
+  try {
+    const { room, error } = await rooms.joinRoomByCode(code);
+    clearPendingInvite();
+    if (error) { showToast(error, 'error'); return; }
+    saveServerId(room.id);
+    showToast(`Você entrou no servidor "${room.name}".`);
+  } finally {
+    inviteInFlight = false;
+  }
 }
 
 // Discord's own leftmost strip — quick server switching alongside the full
@@ -589,11 +669,15 @@ function applyAuthUX() {
     authAvatar.innerHTML = '';
     authAvatar.appendChild(buildAvatar(identity.username));
     usernameInput.value = identity.username || '';
-    refreshMyServers();
+    acceptPendingInvite().finally(refreshMyServers);
   } else {
     showNoServerView(); // don't leave a signed-out session's lobby stuck mid-channel-view for next time
     applyAuthMode();
     applyReturningUserUX();
+    if (loadPendingInvite() && auth.isConfigured()) {
+      authNotice.textContent = 'Você foi convidado para um servidor! Entre ou crie uma conta para aceitar o convite.';
+      authNotice.classList.remove('hidden');
+    }
   }
 }
 
@@ -818,7 +902,7 @@ export async function initLobby(theSocket) {
   joinServerBtn.addEventListener('click', async () => {
     if (joinServerBtn.disabled) return;
     joinServerError.textContent = '';
-    const code = joinServerCodeInput.value.trim();
+    const code = parseInviteCode(joinServerCodeInput.value.trim());
     if (!code) { joinServerError.textContent = 'Cole um código de convite.'; return; }
 
     joinServerBtn.disabled = true;
@@ -846,6 +930,17 @@ export async function initLobby(theSocket) {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !serverModalBackdrop.classList.contains('hidden')) closeServerModal();
+  });
+
+  inviteServerBtn.addEventListener('click', async () => {
+    if (!selectedServer) return;
+    const link = buildInviteLink(selectedServer.id);
+    try {
+      await navigator.clipboard.writeText(link);
+      showToast('Link de convite copiado! Envie para seus amigos.');
+    } catch {
+      showToast(`Não consegui copiar automaticamente. Link: ${link}`, 'error');
+    }
   });
 
   leaveServerBtn.addEventListener('click', async () => {

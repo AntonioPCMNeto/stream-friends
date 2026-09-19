@@ -34,6 +34,7 @@
         <div class="channels-header">
           <div class="sidebar-server-row">
             <div id="selectedServerName" class="sidebar-server-name"></div>
+            <button id="inviteServerBtn" type="button" class="btn-link sidebar-leave-link sidebar-invite-link" title="Copiar link de convite do servidor">Convidar</button>
             <button id="leaveServerBtn" type="button" class="btn-link sidebar-leave-link" title="Sair do servidor">Sair</button>
           </div>
         </div>
@@ -84,7 +85,7 @@
         <div id="serverModalJoinPanel" class="modal-tab-panel hidden">
           <label class="field">
             <span>Código do convite</span>
-            <input id="joinServerCodeInput" type="text" placeholder="Cole o código aqui" maxlength="40">
+            <input id="joinServerCodeInput" type="text" placeholder="Cole o código ou o link do convite" maxlength="200">
           </label>
           <p id="joinServerError" class="error"></p>
           <button id="joinServerBtn" class="btn btn-primary">Entrar no servidor</button>
