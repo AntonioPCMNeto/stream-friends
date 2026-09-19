@@ -1,6 +1,6 @@
 import { iceServers } from './iceServers.js';
 import { state } from './state.js';
-import { renderTiles, updateTileStats } from './tiles.js';
+import { renderTiles, updateTileStats, isStatsVisible } from './tiles.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 
@@ -371,6 +371,15 @@ function measureLocalCaptureFps(purpose) {
 // (whichever currently has the most bytes sent), which naturally avoids a
 // stale/ended sender left behind by a previous share session.
 async function pollStats() {
+  // Minimized or covered by a game: nobody can read the badge or the console,
+  // and every getStats() round trip (one per connection) plus the frame
+  // counter below is CPU competing with the game. The stream itself doesn't
+  // depend on any of this. Measurement resumes on its own once visible.
+  if (document.hidden) {
+    PURPOSES.forEach(stopFrameCounter);
+    return;
+  }
+
   const bestOutbound = { screen: null, webcam: null };
   const bestOutboundReport = { screen: null, webcam: null }; // the full getStats() map bestOutbound came from
   const inboundByKey = new Map();
@@ -407,6 +416,7 @@ async function pollStats() {
       let note = codecName ? ` · ${codecName}` : '';
       if (reason && reason !== 'none') note += ` · ⚠${reason}`; // 'cpu' or 'bandwidth'
       if (path?.relayed) note += ' · relay';
+      if (outbound.powerEfficientEncoder != null) note += outbound.powerEfficientEncoder ? ' · HW enc' : ' · ⚠SW enc';
       applyStatsSample(`local:${purpose}`, outbound, 'bytesSent', note);
 
       if (!streamUpLogged[purpose] && outbound.encoderImplementation && outbound.frameWidth) {
@@ -418,7 +428,12 @@ async function pollStats() {
       // No viewer connected for this purpose — no outbound RTP. Read
       // resolution off the capture track and the live framerate off the
       // frame counter (nominal rate for the first tick, before there's a
-      // delta to measure).
+      // delta to measure). The counter pulls every captured frame into JS,
+      // so it only runs while the badge is actually open.
+      if (!isStatsVisible(`local:${purpose}`)) {
+        stopFrameCounter(purpose);
+        continue;
+      }
       const settings = localStreamFor(purpose).getVideoTracks()[0]?.getSettings();
       if (settings?.width) {
         const liveFps = measureLocalCaptureFps(purpose);

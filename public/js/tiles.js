@@ -105,7 +105,8 @@ function createTile(isLocal, key) {
   video.ondblclick = () => toggleFullscreen(tile);
 
   // "Hide this stream" cover — click it (or the 👁 button) to bring the
-  // stream back. Only built for remote tiles; wired further down.
+  // stream back. Built for remote tiles and for your own screen preview
+  // (which starts hidden); wired further down.
   let hiddenCover = null;
 
   const statsEl = document.createElement('div');
@@ -188,6 +189,39 @@ function createTile(isLocal, key) {
       muteBtn.title = 'Mudo';
     };
     actions.appendChild(volumeSlider);
+  }
+
+  // Your own screen preview is off by default: it's a full-rate decode +
+  // composite of the very screen being captured, running for as long as the
+  // window is alive — pure overhead next to a game, and you're already
+  // looking at what's being shared. Turning it on is a click; the stream sent
+  // to viewers is unaffected either way. (Webcam preview stays on — it's a
+  // small facecam and the only way to check your framing.) renderTiles()
+  // honors `previewOff` by leaving srcObject unset, which is what actually
+  // stops the decode/paint work.
+  if (isLocal && purposeOfKey(key) === 'screen') {
+    tile.previewOff = true;
+    tile.classList.add('stream-hidden');
+
+    const previewBtn = document.createElement('button');
+    previewBtn.className = 'icon-btn';
+    actions.appendChild(previewBtn);
+
+    hiddenCover = document.createElement('button');
+    hiddenCover.className = 'stream-hidden-cover';
+    hiddenCover.textContent = 'Prévia desligada para poupar CPU/GPU — clique para mostrar';
+
+    const setPreview = (on) => {
+      tile.previewOff = !on;
+      tile.classList.toggle('stream-hidden', !on);
+      video.srcObject = on ? tile.liveStream : null;
+      previewBtn.textContent = on ? '👁' : '🚫';
+      previewBtn.title = on ? 'Ocultar prévia' : 'Mostrar prévia';
+      previewBtn.setAttribute('aria-label', previewBtn.title);
+    };
+    setPreview(false);
+    previewBtn.onclick = () => setPreview(tile.previewOff);
+    hiddenCover.onclick = () => setPreview(true);
   }
 
   if (document.pictureInPictureEnabled && !video.disablePictureInPicture) {
@@ -310,10 +344,18 @@ export function renderTiles() {
       tiles.set(key, tile);
     }
     const video = tile.querySelector('video');
-    if (video.srcObject !== stream) video.srcObject = stream;
+    tile.liveStream = stream;
+    const shown = tile.previewOff ? null : stream;
+    if (video.srcObject !== shown) video.srcObject = shown;
     const labelEl = tile.querySelector('.tile-label');
     if (labelEl.textContent !== label) labelEl.textContent = label;
   }
+}
+
+// Whether the viewer has the ℹ️ badge open on this tile. peers.js uses it to
+// skip stats work nobody is looking at.
+export function isStatsVisible(key) {
+  return Boolean(tiles.get(key)?.classList.contains('stats-visible'));
 }
 
 // Updates the small "1280x720 · 30fps · 850kbps" badge shown on a tile.
