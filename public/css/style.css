@@ -259,6 +259,8 @@ main {
   color: var(--text-dim);
 }
 .sidebar-leave-link.btn-link:hover { color: var(--danger); text-decoration: none; }
+.sidebar-invite-link.btn-link { margin-left: auto; }
+.sidebar-invite-link.btn-link:hover { color: var(--accent-hover); }
 .sidebar-server-name {
   font-size: 16px;
   font-weight: 700;
