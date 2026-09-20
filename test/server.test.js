@@ -9,7 +9,11 @@ process.env.PORT = '3999';
 // same-process .env load can't override these back to real values.
 process.env.SUPABASE_URL = '';
 process.env.SUPABASE_ANON_KEY = '';
+process.env.LIVEKIT_URL = 'wss://sfu.example.test:8443';
+process.env.LIVEKIT_API_KEY = 'testkey';
+process.env.LIVEKIT_API_SECRET = 'test-secret-that-is-long-enough-for-hs256-0123456789';
 const { server, io } = require('../server');
+const { TokenVerifier } = require('livekit-server-sdk');
 const { io: ioc } = require('socket.io-client');
 
 const URL = 'http://localhost:3999';
@@ -238,6 +242,31 @@ test('chat-message is rejected from a socket that never joined or viewed that ch
 
   eve.close();
   bystander.close();
+});
+
+test('livekit-token issues a token scoped to the socket\'s own room and identity', async () => {
+  const alice = await connect();
+  alice.emit('join-room', { roomId: 'sfu-room', username: 'Alice' });
+  await wait(100);
+
+  const reply = await new Promise((resolve) => alice.emit('livekit-token', resolve));
+  assert.strictEqual(reply.enabled, true);
+  assert.strictEqual(reply.url, 'wss://sfu.example.test:8443');
+
+  const claims = await new TokenVerifier(process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET).verify(reply.token);
+  assert.strictEqual(claims.sub, alice.id, 'identity must be the socket id');
+  assert.strictEqual(claims.name, 'Alice');
+  assert.strictEqual(claims.video.room, 'sfu-room');
+  assert.strictEqual(claims.video.roomJoin, true);
+
+  alice.close();
+});
+
+test('livekit-token is refused for a socket that is not in a room', async () => {
+  const lurker = await connect();
+  const reply = await new Promise((resolve) => lurker.emit('livekit-token', resolve));
+  assert.deepStrictEqual(reply, { enabled: false });
+  lurker.close();
 });
 
 test.after(() => {
