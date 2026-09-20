@@ -1,8 +1,13 @@
 import { iceServers } from './iceServers.js';
 import { state } from './state.js';
-import { renderTiles, updateTileStats } from './tiles.js';
+import { renderTiles, updateTileStats, isStatsVisible, isLocalPreviewOn, isManuallyHidden } from './tiles.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
+import {
+  initSfu, beginTransport, disconnectSfu, transportMode, transportDecided,
+  publishStream, unpublishStream, replacePublishedStream, getPublishedVideoSender,
+  hasSfuViewers, sfuViewerCount, setSfuWatching, collectSfuStats,
+} from './sfu.js';
 
 const PURPOSES = ['screen', 'webcam'];
 
@@ -42,6 +47,93 @@ function localStreamFor(purpose) {
 // watching our screen, or vice versa. Survives source switches and
 // re-offers; cleared when we stop that stream or the peer leaves.
 const pausedViewers = new Set(); // connKey
+
+// HOST SIDE: the connections we offered our own stream on. peerConnections
+// also holds the inbound ones (streams we're watching), so this is what tells
+// "someone is receiving our video" apart from "we're watching someone".
+const outgoingKeys = new Set(); // connKey
+
+// Which transport each of our own outgoing streams was started on: 'sfu' (one
+// publish to the LiveKit room) or 'mesh' (an offer per peer). Decided per share
+// in startOutgoing(), because a share can end up on the mesh even when the room
+// has an SFU. Viewers always accept both, so it only matters on the sending side.
+const outgoingVia = { screen: null, webcam: null };
+
+// Capture is a fixed cost: the OS capturer copies and scales every frame
+// whether or not anything consumes it (measured ~12% of a core at 720p30, plus
+// steady 3D-engine load). So while no viewer is actually receiving the video —
+// nobody joined yet, or every viewer paused it — capture drops to 1 fps, and
+// goes straight back to the original rate/size the moment something needs
+// frames again. Width/height are re-sent with the frame rate because
+// applyConstraints replaces the whole constraint set.
+const IDLE_CAPTURE_FPS = 1;
+const throttledCapture = new WeakMap(); // video track -> { width, height, frameRate } to restore
+
+function activeViewerCount(purpose) {
+  if (outgoingVia[purpose] === 'sfu') return hasSfuViewers(purpose) ? 1 : 0;
+  let count = 0;
+  outgoingKeys.forEach((key) => {
+    if (purposeOfKey(key) === purpose && !pausedViewers.has(key)) count++;
+  });
+  return count;
+}
+
+// Your own preview / stats badge also consume frames, but only while the
+// window can actually be seen.
+function localFramesNeeded(purpose) {
+  return !document.hidden && (isLocalPreviewOn(purpose) || isStatsVisible(`local:${purpose}`));
+}
+
+export function refreshCaptureThrottle() {
+  PURPOSES.forEach((purpose) => {
+    const track = localStreamFor(purpose)?.getVideoTracks()[0];
+    if (!track || track.readyState !== 'live') return;
+    const restore = throttledCapture.get(track);
+    const shouldThrottle = activeViewerCount(purpose) === 0 && !localFramesNeeded(purpose);
+
+    if (shouldThrottle && !restore) {
+      const { width, height, frameRate } = track.getSettings();
+      if (!frameRate || frameRate <= IDLE_CAPTURE_FPS) return;
+      throttledCapture.set(track, { width, height, frameRate });
+      track.applyConstraints({
+        width: { ideal: width },
+        height: { ideal: height },
+        frameRate: { ideal: IDLE_CAPTURE_FPS, max: IDLE_CAPTURE_FPS },
+      }).catch(() => throttledCapture.delete(track));
+    } else if (!shouldThrottle && restore) {
+      throttledCapture.delete(track);
+      track.applyConstraints({
+        width: { ideal: restore.width },
+        height: { ideal: restore.height },
+        frameRate: { ideal: restore.frameRate },
+      }).catch(() => {});
+    }
+  });
+}
+
+// VIEWER SIDE: with our window minimized or fully covered (typically by the
+// game we're playing) nobody can see the video, so ask each sharer to stop
+// sending it to us — the same mechanism as the per-tile hide toggle, so audio
+// keeps flowing and the picture comes straight back when the window does.
+// Picture-in-Picture counts as visible, and a stream the viewer hid on
+// purpose is left alone either way.
+const autoPausedKeys = new Set(); // connKey
+
+function syncViewerVisibility() {
+  const canSee = !document.hidden || Boolean(document.pictureInPictureElement);
+  state.sharingPeers.forEach((purposes, peerId) => {
+    purposes.forEach((purpose) => {
+      if (!PURPOSES.includes(purpose)) return;
+      const key = connKey(peerId, purpose);
+      if (canSee) {
+        if (autoPausedKeys.delete(key)) setWatching(peerId, purpose, true);
+      } else if (!autoPausedKeys.has(key) && !isManuallyHidden(key)) {
+        autoPausedKeys.add(key);
+        setWatching(peerId, purpose, false);
+      }
+    });
+  });
+}
 
 // The sender carrying a given media kind on a connection. Matches on
 // receiver.track too, since after replaceTrack(null) the sender's own track
@@ -115,9 +207,12 @@ function closePeerConnection(peerId, purpose) {
     peerConnections.delete(key);
   }
   pausedViewers.delete(key);
+  outgoingKeys.delete(key);
+  autoPausedKeys.delete(key);
   lastStatsSample.delete(key);
   state.streams.delete(key);
   renderTiles();
+  refreshCaptureThrottle();
 }
 
 function closeConnectionsForPeer(peerId) {
@@ -135,12 +230,27 @@ export function announceSharingStatus(purpose, isSharing) {
 // entirely while hidden — see the 'watch-status' handler in
 // initPeerSignaling.
 export function setWatching(peerId, purpose, watching) {
+  // The sharer may be on either transport (see startOutgoing): a mesh sharer
+  // hears it over the socket, and the SFU keeps the intent for its publication
+  // (including while the join is still connecting).
+  if (transportMode() !== 'mesh') setSfuWatching(peerId, purpose, watching);
   socket.emit('watch-status', { to: peerId, purpose, watching });
 }
 
 export function closeAllPeerConnections() {
+  disconnectSfu();
+  PURPOSES.forEach((purpose) => { outgoingVia[purpose] = null; });
   const peerIds = new Set(Array.from(peerConnections.keys()).map(peerIdOfKey));
   peerIds.forEach(closeConnectionsForPeer);
+  // Streams received through the SFU have no peer connection to close them.
+  state.streams.clear();
+  renderTiles();
+}
+
+function encodingTarget(purpose) {
+  return purpose === 'webcam'
+    ? { kbps: WEBCAM_BITRATE_KBPS, fps: WEBCAM_FRAMERATE_FPS }
+    : { kbps: state.videoBitrateKbps, fps: state.videoFramerateFps };
 }
 
 // Configures a video sender. The sent resolution is exactly what was
@@ -156,8 +266,7 @@ function applyEncodingParams(sender, purpose) {
   const params = sender.getParameters();
   if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
   const enc = params.encodings[0];
-  const bitrateKbps = purpose === 'webcam' ? WEBCAM_BITRATE_KBPS : state.videoBitrateKbps;
-  const framerateFps = purpose === 'webcam' ? WEBCAM_FRAMERATE_FPS : state.videoFramerateFps;
+  const { kbps: bitrateKbps, fps: framerateFps } = encodingTarget(purpose);
   enc.maxBitrate = bitrateKbps ? bitrateKbps * 1000 : undefined;
   enc.maxFramerate = framerateFps || undefined;
   enc.scaleResolutionDownBy = 1;
@@ -171,6 +280,11 @@ function applyEncodingParams(sender, purpose) {
 // sender for one purpose — used when the user changes a share-panel control
 // while already sharing (screen only; webcam has no such controls).
 export function updateEncodingParams(purpose) {
+  if (outgoingVia[purpose] === 'sfu') {
+    const sender = getPublishedVideoSender(purpose);
+    if (sender) applyEncodingParams(sender, purpose);
+    return;
+  }
   peerConnections.forEach((pc, key) => {
     if (purposeOfKey(key) !== purpose) return;
     pc.getSenders().forEach((sender) => {
@@ -188,19 +302,34 @@ export function updateEncodingParams(purpose) {
 // the profile every hardware encoder implements, so it's least likely to
 // silently fall back to the software encoder. No-op (keeps the default
 // order) where H.264 isn't offered at all.
-function preferHardwareH264(pc, sender) {
+function meshH264Score(c) {
+  const fmtp = (c.sdpFmtpLine || '').toLowerCase();
+  let s = 0;
+  if (fmtp.includes('packetization-mode=1')) s += 2;
+  if (fmtp.includes('profile-level-id=42e01f') || fmtp.includes('profile-level-id=42001f')) s += 1;
+  return s;
+}
+
+// The SFU's answer accepts only Constrained Baseline as 42e01f — the variant
+// Chrome's *software* OpenH264 serves — plus Main and High, and never the
+// 42001f a mesh peer accepts, which is what the hardware encoder advertises.
+// Ranking 42e01f first there locks in the software encoder for the whole
+// share (measured: OpenH264 at 1080p vs the AMD hardware encoder). Main and
+// High are only advertised by hardware encoders, so they go first.
+function sfuH264Score(c) {
+  const fmtp = (c.sdpFmtpLine || '').toLowerCase();
+  let s = fmtp.includes('packetization-mode=1') ? 1 : 0;
+  if (fmtp.includes('profile-level-id=64')) s += 100;
+  else if (fmtp.includes('profile-level-id=4d')) s += 50;
+  else if (fmtp.includes('profile-level-id=42001f')) s += 30;
+  return s;
+}
+
+function preferHardwareH264(pc, sender, h264Score = meshH264Score) {
   const transceiver = pc.getTransceivers().find((t) => t.sender === sender);
   if (!transceiver?.setCodecPreferences) return;
   const caps = RTCRtpSender.getCapabilities('video');
   if (!caps) return;
-
-  const h264Score = (c) => {
-    const fmtp = (c.sdpFmtpLine || '').toLowerCase();
-    let s = 0;
-    if (fmtp.includes('packetization-mode=1')) s += 2;
-    if (fmtp.includes('profile-level-id=42e01f') || fmtp.includes('profile-level-id=42001f')) s += 1;
-    return s;
-  };
 
   const h264 = caps.codecs
     .filter((c) => c.mimeType === 'video/H264')
@@ -274,6 +403,7 @@ const lastLimitLog = {
 };
 
 function countConnectionsForPurpose(purpose) {
+  if (outgoingVia[purpose] === 'sfu') return sfuViewerCount();
   let count = 0;
   peerConnections.forEach((_, key) => { if (purposeOfKey(key) === purpose) count++; });
   return count;
@@ -371,19 +501,22 @@ function measureLocalCaptureFps(purpose) {
 // (whichever currently has the most bytes sent), which naturally avoids a
 // stale/ended sender left behind by a previous share session.
 async function pollStats() {
+  refreshCaptureThrottle(); // safety net for any state change that missed its own trigger
+
+  // Minimized or covered by a game: nobody can read the badge or the console,
+  // and every getStats() round trip (one per connection) plus the frame
+  // counter below is CPU competing with the game. The stream itself doesn't
+  // depend on any of this. Measurement resumes on its own once visible.
+  if (document.hidden) {
+    PURPOSES.forEach(stopFrameCounter);
+    return;
+  }
+
   const bestOutbound = { screen: null, webcam: null };
   const bestOutboundReport = { screen: null, webcam: null }; // the full getStats() map bestOutbound came from
   const inboundByKey = new Map();
 
-  // Fetched concurrently — each pc.getStats() round trip is independent, so
-  // awaiting them one at a time only added up latency without buying
-  // anything (the shared bestOutbound/bestOutboundReport objects are only
-  // mutated inside each report's own synchronous forEach, so concurrent
-  // resolution order can't race). Matters most for a host with several
-  // viewer connections, where this was serializing N stats fetches every tick.
-  await Promise.all(Array.from(peerConnections, async ([key, pc]) => {
-    const purpose = purposeOfKey(key);
-    const statsReport = await pc.getStats();
+  const ingest = (key, purpose, statsReport) => {
     statsReport.forEach((report) => {
       if (report.type === 'outbound-rtp' && report.kind === 'video') {
         if (!bestOutbound[purpose] || report.bytesSent > bestOutbound[purpose].bytesSent) {
@@ -394,7 +527,23 @@ async function pollStats() {
         inboundByKey.set(key, report);
       }
     });
-  }));
+  };
+
+  // Fetched concurrently — each getStats() round trip is independent, so
+  // awaiting them one at a time only added up latency without buying
+  // anything (the shared bestOutbound/bestOutboundReport objects are only
+  // mutated inside each report's own synchronous forEach, so concurrent
+  // resolution order can't race). Matters most for a host with several
+  // viewer connections, where this was serializing N stats fetches every tick.
+  // The SFU's reports are the same RTCStatsReport shape, so they go through
+  // the same extraction.
+  await Promise.all([
+    ...Array.from(peerConnections, async ([key, pc]) => ingest(key, purposeOfKey(key), await pc.getStats())),
+    collectSfuStats().then(({ outbound, inbound }) => {
+      Object.entries(outbound).forEach(([purpose, report]) => ingest(`local:${purpose}`, purpose, report));
+      inbound.forEach((report, key) => ingest(key, purposeOfKey(key), report));
+    }),
+  ]);
 
   for (const purpose of PURPOSES) {
     const outbound = bestOutbound[purpose];
@@ -407,6 +556,7 @@ async function pollStats() {
       let note = codecName ? ` · ${codecName}` : '';
       if (reason && reason !== 'none') note += ` · ⚠${reason}`; // 'cpu' or 'bandwidth'
       if (path?.relayed) note += ' · relay';
+      if (outbound.powerEfficientEncoder != null) note += outbound.powerEfficientEncoder ? ' · HW enc' : ' · ⚠SW enc';
       applyStatsSample(`local:${purpose}`, outbound, 'bytesSent', note);
 
       if (!streamUpLogged[purpose] && outbound.encoderImplementation && outbound.frameWidth) {
@@ -418,7 +568,12 @@ async function pollStats() {
       // No viewer connected for this purpose — no outbound RTP. Read
       // resolution off the capture track and the live framerate off the
       // frame counter (nominal rate for the first tick, before there's a
-      // delta to measure).
+      // delta to measure). The counter pulls every captured frame into JS,
+      // so it only runs while the badge is actually open.
+      if (!isStatsVisible(`local:${purpose}`)) {
+        stopFrameCounter(purpose);
+        continue;
+      }
       const settings = localStreamFor(purpose).getVideoTracks()[0]?.getSettings();
       if (settings?.width) {
         const liveFps = measureLocalCaptureFps(purpose);
@@ -445,6 +600,7 @@ export async function callPeer(peerId, purpose) {
   if (!stream) return;
   const key = connKey(peerId, purpose);
   const pc = getOrCreatePeerConnection(peerId, purpose);
+  outgoingKeys.add(key);
   stream.getTracks().forEach((track) => {
     const sender = pc.addTrack(track, stream);
     if (track.kind === 'video') {
@@ -452,12 +608,66 @@ export async function callPeer(peerId, purpose) {
       preferHardwareH264(pc, sender);
     }
   });
+  refreshCaptureThrottle();
   // Peer hid this stream before we (re)connected — offer the m-line but
   // send no video until they un-hide.
   if (pausedViewers.has(key)) {
     await senderForKind(pc, 'video')?.replaceTrack(null);
   }
   await sendOffer(pc, peerId, purpose);
+}
+
+// Whether publishing through the SFU would actually get a hardware encoder.
+// The SFU's server only accepts hardware-friendly H.264 as High profile, and
+// Chrome only lists High while its GPU encoder discovery succeeded — which, on
+// a busy GPU, sometimes it doesn't (then the SFU would lock in software
+// OpenH264, at a fraction of the resolution). Hardware present but High missing
+// means that share is better off on the mesh, whose 42001f variant does get the
+// hardware encoder. No hardware at all is a software encode either way, and one
+// software encode through the SFU still beats one per viewer.
+function sfuCanUseHardwareEncoder() {
+  const h264 = (RTCRtpSender.getCapabilities('video')?.codecs || [])
+    .filter((c) => c.mimeType === 'video/H264')
+    .map((c) => (c.sdpFmtpLine || '').toLowerCase());
+  const hasHigh = h264.some((f) => f.includes('profile-level-id=64') && f.includes('packetization-mode=1'));
+  const hasHardware = h264.some((f) => f.includes('profile-level-id=64') || f.includes('profile-level-id=4d') || f.includes('profile-level-id=42001f'));
+  return hasHigh || !hasHardware;
+}
+
+// Sends one of our streams on the transport chosen for it: a single publish to
+// the SFU, or (mesh) an offer to every peer already here.
+async function sendOutgoing(purpose, mode) {
+  const via = mode === 'sfu' && sfuCanUseHardwareEncoder() ? 'sfu' : 'mesh';
+  outgoingVia[purpose] = via;
+  if (via === 'sfu') {
+    await publishStream(purpose);
+  } else {
+    state.knownPeers.forEach((id) => callPeer(id, purpose));
+  }
+}
+
+// HOST SIDE: start sending one of our streams to the room. Waits for the
+// join's transport decision, so a share started right after joining still
+// lands on the right one.
+export async function startOutgoing(purpose) {
+  try {
+    await sendOutgoing(purpose, await transportDecided());
+  } catch (err) {
+    console.error(`Failed to start sending ${purpose}:`, err);
+    showToast('Não foi possível enviar o vídeo para a sala.', 'error');
+  }
+  refreshCaptureThrottle();
+}
+
+// Runs when a join settles on a transport: (re)sends whatever we're already
+// sharing — the case after a reconnect — on it.
+function onTransportDecided(result) {
+  PURPOSES.forEach((purpose) => {
+    if (!localStreamFor(purpose)) return;
+    sendOutgoing(purpose, result)
+      .then(refreshCaptureThrottle)
+      .catch((err) => console.error(`Failed to resend ${purpose}:`, err));
+  });
 }
 
 // HOST SIDE: swap the shared screen source (window/tab/monitor) on every
@@ -467,6 +677,8 @@ export async function callPeer(peerId, purpose) {
 // uncommon case where the new source adds or drops an audio track relative
 // to the old one. (Only screen sharing offers source switching today.)
 export async function replaceOutgoingStream(purpose, newStream) {
+  if (outgoingVia[purpose] === 'sfu') return replacePublishedStream(purpose, newStream);
+
   const next = {
     video: newStream.getVideoTracks()[0] || null,
     audio: newStream.getAudioTracks()[0] || null,
@@ -515,9 +727,14 @@ export function removeOutgoingTracks(purpose) {
   streamUpLogged[purpose] = false; // re-log codec/encoder on the next share
   lastLimitLog[purpose] = { reason: 'none', at: 0 };
   stopFrameCounter(purpose);
+  if (outgoingVia[purpose] === 'sfu') unpublishStream(purpose).catch((err) => console.error(`Failed to unpublish ${purpose}:`, err));
+  outgoingVia[purpose] = null;
   // A fresh share of this purpose is visible to everyone again.
   Array.from(pausedViewers).forEach((key) => {
     if (purposeOfKey(key) === purpose) pausedViewers.delete(key);
+  });
+  Array.from(outgoingKeys).forEach((key) => {
+    if (purposeOfKey(key) === purpose) outgoingKeys.delete(key);
   });
   peerConnections.forEach((pc, key) => {
     if (purposeOfKey(key) !== purpose) return;
@@ -533,7 +750,20 @@ export function removeOutgoingTracks(purpose) {
 // Wires the room-presence and WebRTC signaling events relayed by the server.
 export function initPeerSignaling(theSocket) {
   socket = theSocket;
+  initSfu(theSocket, {
+    encodingTarget,
+    onDecided: onTransportDecided,
+    preferHardwareH264: (pc, sender) => preferHardwareH264(pc, sender, sfuH264Score),
+  });
   setInterval(pollStats, 2000);
+
+  const onVisibilityChange = () => {
+    syncViewerVisibility();
+    refreshCaptureThrottle();
+  };
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  document.addEventListener('enterpictureinpicture', onVisibilityChange, true);
+  document.addEventListener('leavepictureinpicture', onVisibilityChange, true);
 
   // Peers already in the room when we joined. Deliberately silent (no
   // toasts) — this is a one-time dump of everyone already present, not
@@ -546,10 +776,13 @@ export function initPeerSignaling(theSocket) {
       const purposes = new Set(PURPOSES.filter((p) => sharing?.[p]));
       if (purposes.size > 0) state.sharingPeers.set(id, purposes);
     });
-    peers.forEach(({ id }) => {
-      if (state.isSharingScreen) callPeer(id, 'screen');
-      if (state.isSharingWebcam) callPeer(id, 'webcam');
-    });
+    // Decides SFU vs mesh for this join; onTransportDecided then sends
+    // whatever we're already sharing (a reconnect while sharing) on it.
+    beginTransport();
+    // A reconnect gave us a new socket id, so sharers no longer remember what
+    // we paused — start from a clean slate and re-send it if we're hidden.
+    autoPausedKeys.clear();
+    syncViewerVisibility();
     refreshParticipants();
   });
 
@@ -561,8 +794,11 @@ export function initPeerSignaling(theSocket) {
     state.knownPeers.add(id);
     state.peerUsernames.set(id, username);
     state.peerVerified.set(id, Boolean(verified));
-    if (state.isSharingScreen) callPeer(id, 'screen');
-    if (state.isSharingWebcam) callPeer(id, 'webcam');
+    // Only a mesh stream needs an offer per newcomer — through the SFU they
+    // subscribe on their own, and while a join is deciding, onTransportDecided
+    // covers everyone already in knownPeers.
+    if (state.isSharingScreen && outgoingVia.screen === 'mesh') callPeer(id, 'screen');
+    if (state.isSharingWebcam && outgoingVia.webcam === 'mesh') callPeer(id, 'webcam');
     showToast(`${username} entrou na sala`);
     refreshParticipants();
   });
@@ -595,9 +831,11 @@ export function initPeerSignaling(theSocket) {
       if (purposes.size === 0) state.sharingPeers.delete(id); else state.sharingPeers.set(id, purposes);
       const key = connKey(id, purpose);
       state.streams.delete(key);
+      autoPausedKeys.delete(key); // the sharer forgets pauses when a share stops
       renderTiles();
       lastStatsSample.delete(key);
     }
+    syncViewerVisibility();
     refreshParticipants();
   });
 
@@ -610,6 +848,7 @@ export function initPeerSignaling(theSocket) {
     const key = connKey(from, purpose);
     if (watching) pausedViewers.delete(key);
     else pausedViewers.add(key);
+    refreshCaptureThrottle();
 
     const sender = senderForKind(peerConnections.get(key), 'video');
     if (!sender) return; // not connected yet — callPeer() will honor pausedViewers

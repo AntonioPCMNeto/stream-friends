@@ -886,11 +886,6 @@ main {
   border-radius: 999px;
   flex-shrink: 0;
   white-space: nowrap;
-  animation: pulse-live 1.6s ease-in-out infinite;
-}
-@keyframes pulse-live {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
 }
 /* Discord-style presence dot on the avatar itself, replacing a text badge —
    cut into the avatar via a border matching the row's own background so it

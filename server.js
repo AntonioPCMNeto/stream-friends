@@ -59,6 +59,15 @@ app.get('/api/ice-servers', async (req, res) => {
   }
 });
 
+// Optional LiveKit SFU (see 'livekit-token' below). Only enabled when all three
+// vars are set; otherwise every client keeps using the peer-to-peer mesh. The
+// SDK is required lazily so a deploy without these vars never depends on it.
+const LIVEKIT_URL = process.env.LIVEKIT_URL;
+const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY;
+const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
+const livekitEnabled = Boolean(LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_API_SECRET);
+const AccessToken = livekitEnabled ? require('livekit-server-sdk').AccessToken : null;
+
 // The web app talks to this server same-origin, so CORS never applies to
 // it — this only matters for the companion Electron desktop client, which
 // loads its page via file:// (no origin to be "same" with) and must
@@ -251,6 +260,29 @@ io.on('connection', (socket) => {
     validIds.forEach((id) => socket.join(`watch:${id}`));
 
     socket.emit('voice-occupancy-snapshot', validIds.map((id) => ({ channelId: id, occupants: getVoiceOccupants(id) })));
+  });
+
+  // Hands a room member the URL + a join token for the LiveKit SFU. The
+  // socket's own room is the only one it can get a token for, and its socket
+  // id is the LiveKit identity, so a client's media and its presence here line
+  // up 1:1. `{ enabled: false }` (no LiveKit configured, or not in a room)
+  // tells the client to use the peer-to-peer mesh instead.
+  socket.on('livekit-token', async (ack) => {
+    if (typeof ack !== 'function') return;
+    const { roomId, username } = socket.data;
+    if (!livekitEnabled || !roomId) return ack({ enabled: false });
+    try {
+      const token = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+        identity: socket.id,
+        name: username,
+        ttl: '6h',
+      });
+      token.addGrant({ room: roomId, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: false });
+      ack({ enabled: true, url: LIVEKIT_URL, token: await token.toJwt() });
+    } catch (err) {
+      console.error('[livekit-token] failed, client falls back to mesh:', err.message);
+      ack({ enabled: false });
+    }
   });
 
   // A viewer telling one specific sharer whether it still wants a given
