@@ -4,6 +4,7 @@ import { initSharing } from './share.js';
 import { initParticipants } from './participants.js';
 import { initChat } from './chat.js';
 import { initVoice } from './voice.js';
+import { initVoiceMenu } from './voiceMenu.js';
 import { startIceServersRefresh } from './iceServers.js';
 
 const socket = io();
@@ -15,3 +16,4 @@ initSharing();
 initParticipants();
 initChat(socket);
 initVoice(socket);
+initVoiceMenu();
