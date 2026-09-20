@@ -53,6 +53,12 @@ const pausedViewers = new Set(); // connKey
 // "someone is receiving our video" apart from "we're watching someone".
 const outgoingKeys = new Set(); // connKey
 
+// Which transport each of our own outgoing streams was started on: 'sfu' (one
+// publish to the LiveKit room) or 'mesh' (an offer per peer). Decided per share
+// in startOutgoing(), because a share can end up on the mesh even when the room
+// has an SFU. Viewers always accept both, so it only matters on the sending side.
+const outgoingVia = { screen: null, webcam: null };
+
 // Capture is a fixed cost: the OS capturer copies and scales every frame
 // whether or not anything consumes it (measured ~12% of a core at 720p30, plus
 // steady 3D-engine load). So while no viewer is actually receiving the video —
@@ -64,7 +70,7 @@ const IDLE_CAPTURE_FPS = 1;
 const throttledCapture = new WeakMap(); // video track -> { width, height, frameRate } to restore
 
 function activeViewerCount(purpose) {
-  if (transportMode() === 'sfu') return hasSfuViewers(purpose) ? 1 : 0;
+  if (outgoingVia[purpose] === 'sfu') return hasSfuViewers(purpose) ? 1 : 0;
   let count = 0;
   outgoingKeys.forEach((key) => {
     if (purposeOfKey(key) === purpose && !pausedViewers.has(key)) count++;
@@ -224,14 +230,16 @@ export function announceSharingStatus(purpose, isSharing) {
 // entirely while hidden — see the 'watch-status' handler in
 // initPeerSignaling.
 export function setWatching(peerId, purpose, watching) {
-  // While a join is still deciding its transport, tell both: the mesh sharer
-  // hears it over the socket, and the SFU keeps the intent for when it connects.
+  // The sharer may be on either transport (see startOutgoing): a mesh sharer
+  // hears it over the socket, and the SFU keeps the intent for its publication
+  // (including while the join is still connecting).
   if (transportMode() !== 'mesh') setSfuWatching(peerId, purpose, watching);
-  if (transportMode() !== 'sfu') socket.emit('watch-status', { to: peerId, purpose, watching });
+  socket.emit('watch-status', { to: peerId, purpose, watching });
 }
 
 export function closeAllPeerConnections() {
   disconnectSfu();
+  PURPOSES.forEach((purpose) => { outgoingVia[purpose] = null; });
   const peerIds = new Set(Array.from(peerConnections.keys()).map(peerIdOfKey));
   peerIds.forEach(closeConnectionsForPeer);
   // Streams received through the SFU have no peer connection to close them.
@@ -272,7 +280,7 @@ function applyEncodingParams(sender, purpose) {
 // sender for one purpose — used when the user changes a share-panel control
 // while already sharing (screen only; webcam has no such controls).
 export function updateEncodingParams(purpose) {
-  if (transportMode() === 'sfu') {
+  if (outgoingVia[purpose] === 'sfu') {
     const sender = getPublishedVideoSender(purpose);
     if (sender) applyEncodingParams(sender, purpose);
     return;
@@ -294,19 +302,34 @@ export function updateEncodingParams(purpose) {
 // the profile every hardware encoder implements, so it's least likely to
 // silently fall back to the software encoder. No-op (keeps the default
 // order) where H.264 isn't offered at all.
-function preferHardwareH264(pc, sender) {
+function meshH264Score(c) {
+  const fmtp = (c.sdpFmtpLine || '').toLowerCase();
+  let s = 0;
+  if (fmtp.includes('packetization-mode=1')) s += 2;
+  if (fmtp.includes('profile-level-id=42e01f') || fmtp.includes('profile-level-id=42001f')) s += 1;
+  return s;
+}
+
+// The SFU's answer accepts only Constrained Baseline as 42e01f — the variant
+// Chrome's *software* OpenH264 serves — plus Main and High, and never the
+// 42001f a mesh peer accepts, which is what the hardware encoder advertises.
+// Ranking 42e01f first there locks in the software encoder for the whole
+// share (measured: OpenH264 at 1080p vs the AMD hardware encoder). Main and
+// High are only advertised by hardware encoders, so they go first.
+function sfuH264Score(c) {
+  const fmtp = (c.sdpFmtpLine || '').toLowerCase();
+  let s = fmtp.includes('packetization-mode=1') ? 1 : 0;
+  if (fmtp.includes('profile-level-id=64')) s += 100;
+  else if (fmtp.includes('profile-level-id=4d')) s += 50;
+  else if (fmtp.includes('profile-level-id=42001f')) s += 30;
+  return s;
+}
+
+function preferHardwareH264(pc, sender, h264Score = meshH264Score) {
   const transceiver = pc.getTransceivers().find((t) => t.sender === sender);
   if (!transceiver?.setCodecPreferences) return;
   const caps = RTCRtpSender.getCapabilities('video');
   if (!caps) return;
-
-  const h264Score = (c) => {
-    const fmtp = (c.sdpFmtpLine || '').toLowerCase();
-    let s = 0;
-    if (fmtp.includes('packetization-mode=1')) s += 2;
-    if (fmtp.includes('profile-level-id=42e01f') || fmtp.includes('profile-level-id=42001f')) s += 1;
-    return s;
-  };
 
   const h264 = caps.codecs
     .filter((c) => c.mimeType === 'video/H264')
@@ -380,7 +403,7 @@ const lastLimitLog = {
 };
 
 function countConnectionsForPurpose(purpose) {
-  if (transportMode() === 'sfu') return sfuViewerCount();
+  if (outgoingVia[purpose] === 'sfu') return sfuViewerCount();
   let count = 0;
   peerConnections.forEach((_, key) => { if (purposeOfKey(key) === purpose) count++; });
   return count;
@@ -594,17 +617,41 @@ export async function callPeer(peerId, purpose) {
   await sendOffer(pc, peerId, purpose);
 }
 
-// HOST SIDE: start sending one of our streams to the room — a single publish
-// to the SFU, or (mesh) an offer to every peer already here. Waits for the
+// Whether publishing through the SFU would actually get a hardware encoder.
+// The SFU's server only accepts hardware-friendly H.264 as High profile, and
+// Chrome only lists High while its GPU encoder discovery succeeded — which, on
+// a busy GPU, sometimes it doesn't (then the SFU would lock in software
+// OpenH264, at a fraction of the resolution). Hardware present but High missing
+// means that share is better off on the mesh, whose 42001f variant does get the
+// hardware encoder. No hardware at all is a software encode either way, and one
+// software encode through the SFU still beats one per viewer.
+function sfuCanUseHardwareEncoder() {
+  const h264 = (RTCRtpSender.getCapabilities('video')?.codecs || [])
+    .filter((c) => c.mimeType === 'video/H264')
+    .map((c) => (c.sdpFmtpLine || '').toLowerCase());
+  const hasHigh = h264.some((f) => f.includes('profile-level-id=64') && f.includes('packetization-mode=1'));
+  const hasHardware = h264.some((f) => f.includes('profile-level-id=64') || f.includes('profile-level-id=4d') || f.includes('profile-level-id=42001f'));
+  return hasHigh || !hasHardware;
+}
+
+// Sends one of our streams on the transport chosen for it: a single publish to
+// the SFU, or (mesh) an offer to every peer already here.
+async function sendOutgoing(purpose, mode) {
+  const via = mode === 'sfu' && sfuCanUseHardwareEncoder() ? 'sfu' : 'mesh';
+  outgoingVia[purpose] = via;
+  if (via === 'sfu') {
+    await publishStream(purpose);
+  } else {
+    state.knownPeers.forEach((id) => callPeer(id, purpose));
+  }
+}
+
+// HOST SIDE: start sending one of our streams to the room. Waits for the
 // join's transport decision, so a share started right after joining still
 // lands on the right one.
 export async function startOutgoing(purpose) {
   try {
-    if (await transportDecided() === 'sfu') {
-      await publishStream(purpose);
-    } else {
-      state.knownPeers.forEach((id) => callPeer(id, purpose));
-    }
+    await sendOutgoing(purpose, await transportDecided());
   } catch (err) {
     console.error(`Failed to start sending ${purpose}:`, err);
     showToast('Não foi possível enviar o vídeo para a sala.', 'error');
@@ -617,11 +664,9 @@ export async function startOutgoing(purpose) {
 function onTransportDecided(result) {
   PURPOSES.forEach((purpose) => {
     if (!localStreamFor(purpose)) return;
-    if (result === 'sfu') {
-      publishStream(purpose).then(refreshCaptureThrottle).catch((err) => console.error(`Failed to republish ${purpose}:`, err));
-    } else {
-      state.knownPeers.forEach((id) => callPeer(id, purpose));
-    }
+    sendOutgoing(purpose, result)
+      .then(refreshCaptureThrottle)
+      .catch((err) => console.error(`Failed to resend ${purpose}:`, err));
   });
 }
 
@@ -632,7 +677,7 @@ function onTransportDecided(result) {
 // uncommon case where the new source adds or drops an audio track relative
 // to the old one. (Only screen sharing offers source switching today.)
 export async function replaceOutgoingStream(purpose, newStream) {
-  if (transportMode() === 'sfu') return replacePublishedStream(purpose, newStream);
+  if (outgoingVia[purpose] === 'sfu') return replacePublishedStream(purpose, newStream);
 
   const next = {
     video: newStream.getVideoTracks()[0] || null,
@@ -682,7 +727,8 @@ export function removeOutgoingTracks(purpose) {
   streamUpLogged[purpose] = false; // re-log codec/encoder on the next share
   lastLimitLog[purpose] = { reason: 'none', at: 0 };
   stopFrameCounter(purpose);
-  if (transportMode() === 'sfu') unpublishStream(purpose).catch((err) => console.error(`Failed to unpublish ${purpose}:`, err));
+  if (outgoingVia[purpose] === 'sfu') unpublishStream(purpose).catch((err) => console.error(`Failed to unpublish ${purpose}:`, err));
+  outgoingVia[purpose] = null;
   // A fresh share of this purpose is visible to everyone again.
   Array.from(pausedViewers).forEach((key) => {
     if (purposeOfKey(key) === purpose) pausedViewers.delete(key);
@@ -704,7 +750,11 @@ export function removeOutgoingTracks(purpose) {
 // Wires the room-presence and WebRTC signaling events relayed by the server.
 export function initPeerSignaling(theSocket) {
   socket = theSocket;
-  initSfu(theSocket, { encodingTarget, onDecided: onTransportDecided });
+  initSfu(theSocket, {
+    encodingTarget,
+    onDecided: onTransportDecided,
+    preferHardwareH264: (pc, sender) => preferHardwareH264(pc, sender, sfuH264Score),
+  });
   setInterval(pollStats, 2000);
 
   const onVisibilityChange = () => {
@@ -744,13 +794,11 @@ export function initPeerSignaling(theSocket) {
     state.knownPeers.add(id);
     state.peerUsernames.set(id, username);
     state.peerVerified.set(id, Boolean(verified));
-    // Only the mesh needs an offer per newcomer — through the SFU they
+    // Only a mesh stream needs an offer per newcomer — through the SFU they
     // subscribe on their own, and while a join is deciding, onTransportDecided
     // covers everyone already in knownPeers.
-    if (transportMode() === 'mesh') {
-      if (state.isSharingScreen) callPeer(id, 'screen');
-      if (state.isSharingWebcam) callPeer(id, 'webcam');
-    }
+    if (state.isSharingScreen && outgoingVia.screen === 'mesh') callPeer(id, 'screen');
+    if (state.isSharingWebcam && outgoingVia.webcam === 'mesh') callPeer(id, 'webcam');
     showToast(`${username} entrou na sala`);
     refreshParticipants();
   });

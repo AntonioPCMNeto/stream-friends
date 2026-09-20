@@ -16,7 +16,7 @@ const TOKEN_TIMEOUT_MS = 3000;
 const AUTO_BITRATE_KBPS = 50000;
 
 let socket = null;
-let hooks = { encodingTarget: () => ({ kbps: null, fps: null }), onDecided: () => {} };
+let hooks = { encodingTarget: () => ({ kbps: null, fps: null }), onDecided: () => {}, preferHardwareH264: () => {} };
 
 let lk = null; // livekit-client module, imported the first time a join gets a token
 let room = null;
@@ -146,6 +146,14 @@ async function connect(mine) {
       stopLocalTrackOnUnpublish: false,
     });
     wireRoom(candidate);
+    // Fires once the sender exists but before the offer is built, which is the
+    // window to steer codec selection towards a hardware-encodable H.264.
+    candidate.localParticipant.on(lk.ParticipantEvent.LocalSenderCreated, (sender, track) => {
+      const publisher = candidate.engine.pcManager?.publisher;
+      if (track.kind === lk.Track.Kind.Video && publisher) {
+        hooks.preferHardwareH264({ getTransceivers: () => publisher.getTransceivers() }, sender);
+      }
+    });
     await candidate.connect(reply.url, reply.token);
     if (stale()) {
       candidate.disconnect();
