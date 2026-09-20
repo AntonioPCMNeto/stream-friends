@@ -1,6 +1,7 @@
 import { iceServers } from './iceServers.js';
 import { state } from './state.js';
 import { showToast } from './toast.js';
+import { playJoinSound, playLeaveSound } from './sounds.js';
 import { refreshParticipants, setSpeaking } from './participants.js';
 
 // Voice chat is a full mesh, unlike screen/webcam (one sender -> many
@@ -269,6 +270,8 @@ function setVoiceUI() {
   else if (state.isDeafened) statusEl.textContent = '🔕 Ensurdecido';
   else if (state.isMuted) statusEl.textContent = '🔇 Silenciado';
   else statusEl.textContent = '🎧 Em áudio';
+
+  window.tray?.reportVoiceState({ inVoice, isMuted: state.isMuted, isDeafened: state.isDeafened });
 }
 
 function closeSettingsPopover() {
@@ -296,6 +299,23 @@ function applyMicEnabled() {
   state.micStream?.getAudioTracks().forEach((t) => { t.enabled = enabled; });
 }
 
+// Join/leave cues only play while you're in voice and not deafened, like
+// Discord, and follow the speaker picked in settings. The sink is only
+// re-applied when it changes: switching it re-inits the context's output.
+let cueSinkId = '';
+function playCue(play) {
+  if (!state.isInVoice || state.isDeafened) return;
+  try {
+    const ctx = ensureAudioCtx();
+    const sinkId = currentSpeakerDeviceId === 'default' ? '' : currentSpeakerDeviceId;
+    if (typeof ctx.setSinkId === 'function' && sinkId !== cueSinkId) {
+      cueSinkId = sinkId;
+      ctx.setSinkId(sinkId).catch(() => {});
+    }
+    play(ctx);
+  } catch { /* a missed cue must never break signalling */ }
+}
+
 function applyDeafened() {
   audioSinks.forEach((audio) => { audio.muted = state.isDeafened; });
 }
@@ -303,6 +323,49 @@ function applyDeafened() {
 function applySpeakerSink(audio) {
   if (!SPEAKER_SELECTION_SUPPORTED) return;
   audio.setSinkId(currentSpeakerDeviceId).catch(() => {});
+}
+
+// Per-user voice volume (right-click a member, see voiceMenu.js). Remembered by
+// username — socket ids change on every reconnect — and applied through the
+// element's own volume, so deafen (audio.muted) and the speaking indicator
+// (which reads the stream, not the element) are untouched.
+const USER_VOICE_KEY = 'scrimaAi.userVoiceSettings';
+
+function loadUserVoiceSettings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(USER_VOICE_KEY));
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? new Map(Object.entries(raw)) : new Map();
+  } catch { return new Map(); }
+}
+const userVoiceSettings = loadUserVoiceSettings(); // username -> { volume 0..1, muted }
+
+function clampVolume(v) {
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1;
+}
+
+export function getUserVoiceSettings(peerId) {
+  const saved = userVoiceSettings.get(state.peerUsernames.get(peerId));
+  return { volume: clampVolume(saved?.volume), muted: saved?.muted === true };
+}
+
+function applyUserVoice(peerId, audio) {
+  const { volume, muted } = getUserVoiceSettings(peerId);
+  audio.volume = muted ? 0 : volume;
+}
+
+export function setUserVoiceSettings(peerId, patch) {
+  const name = state.peerUsernames.get(peerId);
+  if (!name) return;
+  const next = { ...getUserVoiceSettings(peerId), ...patch };
+  next.volume = clampVolume(next.volume);
+  next.muted = next.muted === true;
+  // Defaults aren't stored, so the map only holds people you actually changed.
+  if (next.volume === 1 && !next.muted) userVoiceSettings.delete(name);
+  else userVoiceSettings.set(name, next);
+  try { localStorage.setItem(USER_VOICE_KEY, JSON.stringify(Object.fromEntries(userVoiceSettings))); } catch { /* best-effort only */ }
+  audioSinks.forEach((audio, id) => {
+    if (state.peerUsernames.get(id) === name) applyUserVoice(id, audio);
+  });
 }
 
 function peerLabel(peerId) {
@@ -334,6 +397,7 @@ function createVoicePc(peerId) {
     }
     audio.srcObject = event.streams[0] || new MediaStream([event.track]);
     audio.muted = state.isDeafened;
+    applyUserVoice(peerId, audio);
     audio.play().catch(() => {});
     attachAnalyser(peerId, audio.srcObject);
   };
@@ -532,6 +596,7 @@ export async function joinVoice() {
   setVoiceUI();
   refreshParticipants();
   showToast('Você entrou no áudio.');
+  playCue(playJoinSound);
 
   socket.emit('share-status', { purpose: 'voice', isSharing: true });
   state.voicePeers.forEach(connectToPeer);
@@ -539,6 +604,7 @@ export async function joinVoice() {
 
 function leaveVoice({ silent = false } = {}) {
   const wasInVoice = state.isInVoice;
+  if (wasInVoice && !silent) playCue(playLeaveSound);
   state.micStream?.getTracks().forEach((t) => t.stop());
   state.micStream = null;
   detachAnalyser('local');
@@ -594,6 +660,10 @@ export function initVoice(theSocket) {
   leaveBtn.addEventListener('click', () => leaveVoice());
   muteBtn.addEventListener('click', toggleMute);
   deafenBtn.addEventListener('click', toggleDeafen);
+  window.tray?.onVoiceCommand((command) => {
+    if (command === 'toggle-mute') toggleMute();
+    else if (command === 'toggle-deafen') toggleDeafen();
+  });
   settingsBtn.addEventListener('click', toggleSettingsPopover);
   micSelect.addEventListener('change', handleMicSelectChange);
   speakerSelect.addEventListener('change', handleSpeakerSelectChange);
@@ -629,17 +699,19 @@ export function initVoice(theSocket) {
   socket.on('peer-share-status', ({ id, purpose, isSharing }) => {
     if (purpose !== 'voice') return;
     if (isSharing) {
+      const isNew = !state.voicePeers.has(id);
       state.voicePeers.add(id);
+      if (isNew) playCue(playJoinSound);
       connectToPeer(id);
     } else {
-      state.voicePeers.delete(id);
+      if (state.voicePeers.delete(id)) playCue(playLeaveSound);
       teardownPeer(id);
     }
     refreshParticipants();
   });
 
   socket.on('peer-left', (peerId) => {
-    state.voicePeers.delete(peerId);
+    if (state.voicePeers.delete(peerId)) playCue(playLeaveSound);
     teardownPeer(peerId);
   });
 

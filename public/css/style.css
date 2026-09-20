@@ -1410,3 +1410,46 @@ main {
 }
 .toast-hide { opacity: 0; }
 .toast-error { border-left: 3px solid var(--danger); }
+
+/* Right-click a member -> local volume slider (voiceMenu.js). */
+.voice-menu {
+  position: fixed;
+  z-index: 70;
+  width: 220px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+.voice-menu.hidden { display: none; }
+.voice-menu-title {
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.voice-menu-volume { display: flex; align-items: center; gap: 10px; }
+.voice-menu-volume input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.voice-menu-value {
+  min-width: 40px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.voice-menu-mute {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  cursor: pointer;
+}

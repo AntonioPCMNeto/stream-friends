@@ -10,6 +10,15 @@ contextBridge.exposeInMainWorld('screenPicker', {
   choose: (pick) => ipcRenderer.invoke('screen-picker:choose', pick),
 });
 
+// System-tray bridge — see createTray() in main.js. Absent on the web build,
+// so voice.js only talks to it when it exists.
+contextBridge.exposeInMainWorld('tray', {
+  reportVoiceState: (voiceState) => ipcRenderer.send('voice:state', voiceState),
+  onVoiceCommand: (callback) => {
+    ipcRenderer.on('voice:command', (_event, command) => callback(command));
+  },
+});
+
 // electron-updater bridge — see initUpdater() in main.js. Absent on the web
 // build, which is how public/js/updater.js knows to stay hidden there.
 contextBridge.exposeInMainWorld('updater', {

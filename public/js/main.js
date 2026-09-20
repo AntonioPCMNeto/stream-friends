@@ -5,6 +5,7 @@ import { initParticipants } from './participants.js';
 import { initUpdater } from './updater.js';
 import { initChat } from './chat.js';
 import { initVoice } from './voice.js';
+import { initVoiceMenu } from './voiceMenu.js';
 import { startIceServersRefresh } from './iceServers.js';
 
 // The Electron shell loads this page via file://, which has no server of its
@@ -24,3 +25,4 @@ initParticipants();
 initUpdater();
 initChat(socket);
 initVoice(socket);
+initVoiceMenu();

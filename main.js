@@ -1,5 +1,6 @@
-const { app, BrowserWindow, session, desktopCapturer, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, Tray, session, desktopCapturer, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
@@ -17,6 +18,10 @@ function lowerPriority() {
 }
 
 let mainWindow = null;
+let tray = null;
+let quitting = false;
+let updateReady = false;
+let voiceState = { inVoice: false, isMuted: false, isDeafened: false };
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -39,6 +44,16 @@ function createWindow() {
   mainWindow.webContents.on('console-message', ({ level, message, lineNumber, sourceId }) => {
     console.log(`renderer console [${level}]:`, message, `(${sourceId}:${lineNumber})`);
   });
+
+  mainWindow.on('close', (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    mainWindow.hide();
+    showTrayHintOnce();
+  });
+  // Windows won't emit before-quit on shutdown/logoff; without this the
+  // close handler above would stall the session end.
+  mainWindow.on('session-end', () => { quitting = true; });
 
   mainWindow.loadFile(path.join(__dirname, 'public', 'index.html'));
 }
@@ -98,6 +113,61 @@ function registerScreenPicker() {
   }, { useSystemPicker: false });
 }
 
+// Closing the window hides it (Discord-style) so voice and shares keep
+// running; only Sair, an update restart or an OS shutdown really quits. Mute
+// and deafen state lives in the renderer (voice.js), so the tray menu mirrors
+// it through `voice:state` and drives it through `voice:command`.
+function showWindow() {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function showTrayHintOnce() {
+  const flag = path.join(app.getPath('userData'), 'tray-hint-shown');
+  if (fs.existsSync(flag)) return;
+  try { fs.writeFileSync(flag, ''); } catch { /* the hint just shows again next time */ }
+  tray?.displayBalloon?.({
+    iconType: 'info',
+    title: 'Scrima aí',
+    content: 'O app continua rodando na bandeja. Clique com o botão direito no ícone para sair.',
+  });
+}
+
+function sendVoiceCommand(command) {
+  mainWindow?.webContents.send('voice:command', command);
+}
+
+function buildTrayMenu() {
+  const { inVoice, isMuted, isDeafened } = voiceState;
+  return Menu.buildFromTemplate([
+    { label: isMuted ? 'Desmutar' : 'Mutar', enabled: inVoice, click: () => sendVoiceCommand('toggle-mute') },
+    { label: isDeafened ? 'Desativar surdina' : 'Ensurdecer', enabled: inVoice, click: () => sendVoiceCommand('toggle-deafen') },
+    ...(updateReady
+      ? [{ type: 'separator' }, { label: 'Reiniciar para atualizar', click: () => autoUpdater.quitAndInstall() }]
+      : []),
+    { type: 'separator' },
+    { label: 'Sair', click: () => app.quit() },
+  ]);
+}
+
+function refreshTray() {
+  tray?.setContextMenu(buildTrayMenu());
+}
+
+function createTray() {
+  tray = new Tray(path.join(__dirname, 'public', 'favicon-32.png'));
+  tray.setToolTip('Scrima aí');
+  tray.on('click', showWindow);
+  refreshTray();
+
+  ipcMain.on('voice:state', (_event, next) => {
+    voiceState = { inVoice: !!next?.inVoice, isMuted: !!next?.isMuted, isDeafened: !!next?.isDeafened };
+    refreshTray();
+  });
+}
+
 // electron-updater checks the GitHub Releases feed (the "publish" block in
 // package.json) for a newer version, downloads it in the background, and
 // installs it on the next quit — no manual download/reinstall. It runs once
@@ -116,7 +186,11 @@ function initUpdater() {
   autoUpdater.on('update-available', (info) => send('available', { version: info.version }));
   autoUpdater.on('update-not-available', () => send('up-to-date'));
   autoUpdater.on('download-progress', (p) => send('downloading', { percent: Math.round(p.percent) }));
-  autoUpdater.on('update-downloaded', (info) => send('downloaded', { version: info.version }));
+  autoUpdater.on('update-downloaded', (info) => {
+    updateReady = true;
+    refreshTray();
+    send('downloaded', { version: info.version });
+  });
   autoUpdater.on('error', (err) => send('error', { message: String(err?.message || err) }));
 
   ipcMain.handle('updater:check', async () => {
@@ -136,13 +210,23 @@ function initUpdater() {
   }
 }
 
+// A second launch (e.g. the shortcut while the app sits in the tray) would
+// otherwise start a second copy fighting over the mic; focus the first instead.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) app.quit();
+app.on('second-instance', showWindow);
+
 app.whenReady().then(() => {
+  if (!gotLock) return;
   createWindow();
+  createTray();
   registerScreenPicker();
   initUpdater();
   lowerPriority();
   setInterval(lowerPriority, 5000).unref();
 });
+
+app.on('before-quit', () => { quitting = true; });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
