@@ -1384,7 +1384,6 @@ main {
   max-width: 220px;
 }
 .picker-audio-select:focus { outline: none; border-color: var(--accent); }
-.picker-audio-hint { font-size: 13px; color: var(--text-dim); font-style: italic; max-width: 320px; }
 .picker-footer-btns { display: flex; gap: 10px; }
 
 /* Toasts */

@@ -1,20 +1,17 @@
 // Electron doesn't show a native "choose what to share" dialog — this module
 // is the themed replacement. share.js calls pickSource() before it invokes
 // getDisplayMedia(); the promise resolves to
-// { sourceId, isScreen, audioMode, deviceId } or null if the user cancels.
-// audioMode 'system' is applied via main.js's display-media handler (see
-// screen-picker:choose there); 'device' is a plain getUserMedia capture that
-// share.js merges into the outgoing stream itself.
+// { sourceId, isScreen, audioMode } or null if the user cancels. audioMode
+// 'system' (default-output loopback, screen or window) is applied via main.js's
+// display-media handler (see screen-picker:choose there).
 
 let overlay = null;
 let selectedButton = null;
 let selectedSourceId = null;
 let selectedIsScreen = false;
-// 'none' | 'system' (whole-system loopback, screen-only) | 'device' (a
-// specific input, e.g. a virtual audio cable — see populateAudioOptions).
-// Persisted across picker opens, same as the old audioEnabled checkbox was.
-let audioMode = 'none';
-let selectedDeviceId = null;
+// 'none' | 'system' (default). Persisted across picker opens, same as the old
+// audioEnabled checkbox was.
+let audioMode = 'system';
 let onKeyDown = null;
 
 // Set for the lifetime of one picker; called exactly once with the result.
@@ -77,26 +74,7 @@ function buildTabButton(text, onClick) {
   return btn;
 }
 
-// Labels are blank until the app has been granted mic permission at least
-// once — probe with a throwaway getUserMedia so the dropdown shows real
-// device names (e.g. "CABLE Output (VB-Audio Virtual Cable)") instead of
-// blank entries. Electron auto-grants this (main.js registers no
-// setPermissionRequestHandler), so it's silent beyond a one-time OS prompt.
-async function listAudioInputDevices() {
-  try {
-    let devices = await navigator.mediaDevices.enumerateDevices();
-    if (devices.some((d) => d.kind === 'audioinput' && !d.label)) {
-      const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
-      probe.getTracks().forEach((t) => t.stop());
-      devices = await navigator.mediaDevices.enumerateDevices();
-    }
-    return devices.filter((d) => d.kind === 'audioinput');
-  } catch {
-    return [];
-  }
-}
-
-function showPicker(sources, audioDevices) {
+function showPicker(sources) {
   const screens = sources.filter((s) => s.isScreen);
   const windows = sources.filter((s) => !s.isScreen);
 
@@ -122,56 +100,24 @@ function showPicker(sources, audioDevices) {
   const footer = document.createElement('div');
   footer.className = 'picker-footer';
 
-  // Electron's built-in loopback can only capture whole-system audio (no API
-  // isolates a single window/app's sound), so it's only offered when sharing
-  // an entire screen — for a window it would silently leak every other app's
-  // audio despite the user picking just one window's video. The device
-  // option is the workaround: route the game/app's output to a virtual audio
-  // cable (VB-Cable, VoiceMeeter, ...) and pick that cable's input here —
-  // it's a normal getUserMedia capture (share.js), so it works for a window
-  // pick too and carries only that routed audio.
+  // Electron's built-in loopback captures whatever plays on the Windows
+  // default output — no API isolates a single window/app's sound, nor picks
+  // another output device or an input. Offered for screens and windows alike;
+  // with a virtual default output such as Sonar's "Gaming" it's effectively
+  // just the game.
   const audioField = document.createElement('label');
   audioField.className = 'picker-audio-field';
   const audioFieldLabel = document.createElement('span');
   audioFieldLabel.textContent = 'Áudio';
   const audioSelect = document.createElement('select');
   audioSelect.className = 'picker-audio-select';
+  audioSelect.appendChild(new Option('Áudio do sistema (saída padrão do Windows)', 'system'));
+  audioSelect.appendChild(new Option('Sem áudio', 'none'));
+  audioSelect.value = audioMode;
+  audioSelect.addEventListener('change', () => { audioMode = audioSelect.value; });
   audioField.appendChild(audioFieldLabel);
   audioField.appendChild(audioSelect);
   footer.appendChild(audioField);
-
-  const audioHint = document.createElement('span');
-  audioHint.className = 'picker-audio-hint';
-  audioHint.textContent = 'Para isolar o áudio de um app/jogo específico, roteie a saída dele para um cabo de áudio virtual (ex.: VB-Cable) e selecione-o aqui.';
-  footer.appendChild(audioHint);
-
-  function populateAudioOptions(systemAvailable) {
-    audioSelect.innerHTML = '';
-    audioSelect.appendChild(new Option('Nenhum', 'none'));
-    if (systemAvailable) audioSelect.appendChild(new Option('Áudio do sistema', 'system'));
-    audioDevices.forEach((d) => {
-      audioSelect.appendChild(new Option(d.label || `Entrada ${d.deviceId.slice(0, 6)}`, d.deviceId));
-    });
-
-    // Restore the previous choice if it's still valid for this tab; otherwise
-    // fall back to 'none' instead of silently keeping a stale pick (e.g.
-    // 'system' selected, then switching to the Janelas tab).
-    const validValues = Array.from(audioSelect.options).map((o) => o.value);
-    let restore = 'none';
-    if (audioMode === 'system' && systemAvailable) restore = 'system';
-    else if (audioMode === 'device' && validValues.includes(selectedDeviceId)) restore = selectedDeviceId;
-    audioSelect.value = restore;
-
-    if (restore === 'none') { audioMode = 'none'; selectedDeviceId = null; }
-    else if (restore === 'system') { audioMode = 'system'; selectedDeviceId = null; }
-    else { audioMode = 'device'; selectedDeviceId = restore; }
-  }
-
-  audioSelect.addEventListener('change', () => {
-    if (audioSelect.value === 'none') { audioMode = 'none'; selectedDeviceId = null; }
-    else if (audioSelect.value === 'system') { audioMode = 'system'; selectedDeviceId = null; }
-    else { audioMode = 'device'; selectedDeviceId = audioSelect.value; }
-  });
 
   const footerBtns = document.createElement('div');
   footerBtns.className = 'picker-footer-btns';
@@ -193,7 +139,6 @@ function showPicker(sources, audioDevices) {
       sourceId: selectedSourceId,
       isScreen: selectedIsScreen,
       audioMode,
-      deviceId: selectedDeviceId,
     });
   });
 
@@ -214,13 +159,11 @@ function showPicker(sources, audioDevices) {
   const screenTab = buildTabButton(`Telas (${screens.length})`, () => {
     screenTab.classList.add('active');
     windowTab.classList.remove('active');
-    populateAudioOptions(true);
     renderGrid(screens);
   });
   const windowTab = buildTabButton(`Janelas (${windows.length})`, () => {
     windowTab.classList.add('active');
     screenTab.classList.remove('active');
-    populateAudioOptions(false);
     renderGrid(windows);
   });
   tabs.appendChild(screenTab);
@@ -228,11 +171,9 @@ function showPicker(sources, audioDevices) {
 
   if (screens.length) {
     screenTab.classList.add('active');
-    populateAudioOptions(true);
     renderGrid(screens);
   } else {
     windowTab.classList.add('active');
-    populateAudioOptions(false);
     renderGrid(windows);
   }
 
@@ -252,12 +193,9 @@ export async function pickSource() {
   if (!window.screenPicker) return null;
   if (resolvePick) finish(null); // abandon any picker already open
 
-  const [sources, audioDevices] = await Promise.all([
-    window.screenPicker.listSources(),
-    listAudioInputDevices(),
-  ]);
+  const sources = await window.screenPicker.listSources();
   return new Promise((resolve) => {
     resolvePick = resolve;
-    showPicker(sources, audioDevices);
+    showPicker(sources);
   });
 }

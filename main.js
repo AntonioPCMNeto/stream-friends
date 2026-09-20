@@ -48,10 +48,9 @@ function createWindow() {
 // handler instead. The renderer runs our themed picker *before* calling
 // getDisplayMedia (screen-picker:sources + screen-picker:choose below) and
 // stashes the choice here — the handler just applies it. This ordering
-// matters: Electron can't capture a single window's audio, so a window
-// share must call getDisplayMedia with audio:false, and the renderer can
-// only know that once the picker has resolved. Requesting audio for a
-// window aborts the whole capture with "Invalid capture constraints".
+// matters: the renderer must only request audio when the user chose it, and
+// the handler must grant it — a mismatch aborts the whole capture with
+// "Invalid capture constraints".
 let pendingPick = null;
 
 function registerScreenPicker() {
@@ -93,8 +92,8 @@ function registerScreenPicker() {
       return;
     }
 
-    // 'loopback' captures whole-system audio (Windows/macOS). Only ever for
-    // a full screen — see the comment on pendingPick above.
+    // 'loopback' captures whatever plays on the default output device
+    // (Windows/macOS), for a screen or a window pick alike.
     callback({ video: chosen, audio: pick.withAudio ? 'loopback' : undefined });
   }, { useSystemPicker: false });
 }
