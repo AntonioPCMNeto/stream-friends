@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { renderTiles } from './tiles.js';
-import { callPeer, updateEncodingParams, announceSharingStatus, removeOutgoingTracks, replaceOutgoingStream, refreshCaptureThrottle } from './peers.js';
+import { startOutgoing, updateEncodingParams, announceSharingStatus, removeOutgoingTracks, replaceOutgoingStream, refreshCaptureThrottle } from './peers.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 import { pickSource } from './screenPicker.js';
@@ -236,8 +236,7 @@ async function startSharing() {
     announceSharingStatus('screen', true);
     refreshParticipants();
 
-    state.knownPeers.forEach((id) => callPeer(id, 'screen'));
-    refreshCaptureThrottle();
+    await startOutgoing('screen');
   } catch (err) {
     reportCaptureError(err);
   } finally {
@@ -272,8 +271,7 @@ async function startWebcam() {
     refreshParticipants();
     refreshSwitchCameraButton();
 
-    state.knownPeers.forEach((id) => callPeer(id, 'webcam'));
-    refreshCaptureThrottle();
+    await startOutgoing('webcam');
   } catch (err) {
     reportCaptureError(err, true);
   } finally {

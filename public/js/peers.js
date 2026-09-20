@@ -3,6 +3,11 @@ import { state } from './state.js';
 import { renderTiles, updateTileStats, isStatsVisible, isLocalPreviewOn, isManuallyHidden } from './tiles.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
+import {
+  initSfu, beginTransport, disconnectSfu, transportMode, transportDecided,
+  publishStream, unpublishStream, replacePublishedStream, getPublishedVideoSender,
+  hasSfuViewers, sfuViewerCount, setSfuWatching, collectSfuStats,
+} from './sfu.js';
 
 const PURPOSES = ['screen', 'webcam'];
 
@@ -59,6 +64,7 @@ const IDLE_CAPTURE_FPS = 1;
 const throttledCapture = new WeakMap(); // video track -> { width, height, frameRate } to restore
 
 function activeViewerCount(purpose) {
+  if (transportMode() === 'sfu') return hasSfuViewers(purpose) ? 1 : 0;
   let count = 0;
   outgoingKeys.forEach((key) => {
     if (purposeOfKey(key) === purpose && !pausedViewers.has(key)) count++;
@@ -218,12 +224,25 @@ export function announceSharingStatus(purpose, isSharing) {
 // entirely while hidden — see the 'watch-status' handler in
 // initPeerSignaling.
 export function setWatching(peerId, purpose, watching) {
-  socket.emit('watch-status', { to: peerId, purpose, watching });
+  // While a join is still deciding its transport, tell both: the mesh sharer
+  // hears it over the socket, and the SFU keeps the intent for when it connects.
+  if (transportMode() !== 'mesh') setSfuWatching(peerId, purpose, watching);
+  if (transportMode() !== 'sfu') socket.emit('watch-status', { to: peerId, purpose, watching });
 }
 
 export function closeAllPeerConnections() {
+  disconnectSfu();
   const peerIds = new Set(Array.from(peerConnections.keys()).map(peerIdOfKey));
   peerIds.forEach(closeConnectionsForPeer);
+  // Streams received through the SFU have no peer connection to close them.
+  state.streams.clear();
+  renderTiles();
+}
+
+function encodingTarget(purpose) {
+  return purpose === 'webcam'
+    ? { kbps: WEBCAM_BITRATE_KBPS, fps: WEBCAM_FRAMERATE_FPS }
+    : { kbps: state.videoBitrateKbps, fps: state.videoFramerateFps };
 }
 
 // Configures a video sender. The sent resolution is exactly what was
@@ -239,8 +258,7 @@ function applyEncodingParams(sender, purpose) {
   const params = sender.getParameters();
   if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
   const enc = params.encodings[0];
-  const bitrateKbps = purpose === 'webcam' ? WEBCAM_BITRATE_KBPS : state.videoBitrateKbps;
-  const framerateFps = purpose === 'webcam' ? WEBCAM_FRAMERATE_FPS : state.videoFramerateFps;
+  const { kbps: bitrateKbps, fps: framerateFps } = encodingTarget(purpose);
   enc.maxBitrate = bitrateKbps ? bitrateKbps * 1000 : undefined;
   enc.maxFramerate = framerateFps || undefined;
   enc.scaleResolutionDownBy = 1;
@@ -254,6 +272,11 @@ function applyEncodingParams(sender, purpose) {
 // sender for one purpose — used when the user changes a share-panel control
 // while already sharing (screen only; webcam has no such controls).
 export function updateEncodingParams(purpose) {
+  if (transportMode() === 'sfu') {
+    const sender = getPublishedVideoSender(purpose);
+    if (sender) applyEncodingParams(sender, purpose);
+    return;
+  }
   peerConnections.forEach((pc, key) => {
     if (purposeOfKey(key) !== purpose) return;
     pc.getSenders().forEach((sender) => {
@@ -357,6 +380,7 @@ const lastLimitLog = {
 };
 
 function countConnectionsForPurpose(purpose) {
+  if (transportMode() === 'sfu') return sfuViewerCount();
   let count = 0;
   peerConnections.forEach((_, key) => { if (purposeOfKey(key) === purpose) count++; });
   return count;
@@ -469,15 +493,7 @@ async function pollStats() {
   const bestOutboundReport = { screen: null, webcam: null }; // the full getStats() map bestOutbound came from
   const inboundByKey = new Map();
 
-  // Fetched concurrently — each pc.getStats() round trip is independent, so
-  // awaiting them one at a time only added up latency without buying
-  // anything (the shared bestOutbound/bestOutboundReport objects are only
-  // mutated inside each report's own synchronous forEach, so concurrent
-  // resolution order can't race). Matters most for a host with several
-  // viewer connections, where this was serializing N stats fetches every tick.
-  await Promise.all(Array.from(peerConnections, async ([key, pc]) => {
-    const purpose = purposeOfKey(key);
-    const statsReport = await pc.getStats();
+  const ingest = (key, purpose, statsReport) => {
     statsReport.forEach((report) => {
       if (report.type === 'outbound-rtp' && report.kind === 'video') {
         if (!bestOutbound[purpose] || report.bytesSent > bestOutbound[purpose].bytesSent) {
@@ -488,7 +504,23 @@ async function pollStats() {
         inboundByKey.set(key, report);
       }
     });
-  }));
+  };
+
+  // Fetched concurrently — each getStats() round trip is independent, so
+  // awaiting them one at a time only added up latency without buying
+  // anything (the shared bestOutbound/bestOutboundReport objects are only
+  // mutated inside each report's own synchronous forEach, so concurrent
+  // resolution order can't race). Matters most for a host with several
+  // viewer connections, where this was serializing N stats fetches every tick.
+  // The SFU's reports are the same RTCStatsReport shape, so they go through
+  // the same extraction.
+  await Promise.all([
+    ...Array.from(peerConnections, async ([key, pc]) => ingest(key, purposeOfKey(key), await pc.getStats())),
+    collectSfuStats().then(({ outbound, inbound }) => {
+      Object.entries(outbound).forEach(([purpose, report]) => ingest(`local:${purpose}`, purpose, report));
+      inbound.forEach((report, key) => ingest(key, purposeOfKey(key), report));
+    }),
+  ]);
 
   for (const purpose of PURPOSES) {
     const outbound = bestOutbound[purpose];
@@ -562,6 +594,37 @@ export async function callPeer(peerId, purpose) {
   await sendOffer(pc, peerId, purpose);
 }
 
+// HOST SIDE: start sending one of our streams to the room — a single publish
+// to the SFU, or (mesh) an offer to every peer already here. Waits for the
+// join's transport decision, so a share started right after joining still
+// lands on the right one.
+export async function startOutgoing(purpose) {
+  try {
+    if (await transportDecided() === 'sfu') {
+      await publishStream(purpose);
+    } else {
+      state.knownPeers.forEach((id) => callPeer(id, purpose));
+    }
+  } catch (err) {
+    console.error(`Failed to start sending ${purpose}:`, err);
+    showToast('Não foi possível enviar o vídeo para a sala.', 'error');
+  }
+  refreshCaptureThrottle();
+}
+
+// Runs when a join settles on a transport: (re)sends whatever we're already
+// sharing — the case after a reconnect — on it.
+function onTransportDecided(result) {
+  PURPOSES.forEach((purpose) => {
+    if (!localStreamFor(purpose)) return;
+    if (result === 'sfu') {
+      publishStream(purpose).then(refreshCaptureThrottle).catch((err) => console.error(`Failed to republish ${purpose}:`, err));
+    } else {
+      state.knownPeers.forEach((id) => callPeer(id, purpose));
+    }
+  });
+}
+
 // HOST SIDE: swap the shared screen source (window/tab/monitor) on every
 // live viewer connection for that purpose, without tearing anything down.
 // sender.replaceTrack() changes the media in place — no offer/answer — so
@@ -569,6 +632,8 @@ export async function callPeer(peerId, purpose) {
 // uncommon case where the new source adds or drops an audio track relative
 // to the old one. (Only screen sharing offers source switching today.)
 export async function replaceOutgoingStream(purpose, newStream) {
+  if (transportMode() === 'sfu') return replacePublishedStream(purpose, newStream);
+
   const next = {
     video: newStream.getVideoTracks()[0] || null,
     audio: newStream.getAudioTracks()[0] || null,
@@ -617,6 +682,7 @@ export function removeOutgoingTracks(purpose) {
   streamUpLogged[purpose] = false; // re-log codec/encoder on the next share
   lastLimitLog[purpose] = { reason: 'none', at: 0 };
   stopFrameCounter(purpose);
+  if (transportMode() === 'sfu') unpublishStream(purpose).catch((err) => console.error(`Failed to unpublish ${purpose}:`, err));
   // A fresh share of this purpose is visible to everyone again.
   Array.from(pausedViewers).forEach((key) => {
     if (purposeOfKey(key) === purpose) pausedViewers.delete(key);
@@ -638,6 +704,7 @@ export function removeOutgoingTracks(purpose) {
 // Wires the room-presence and WebRTC signaling events relayed by the server.
 export function initPeerSignaling(theSocket) {
   socket = theSocket;
+  initSfu(theSocket, { encodingTarget, onDecided: onTransportDecided });
   setInterval(pollStats, 2000);
 
   const onVisibilityChange = () => {
@@ -659,10 +726,9 @@ export function initPeerSignaling(theSocket) {
       const purposes = new Set(PURPOSES.filter((p) => sharing?.[p]));
       if (purposes.size > 0) state.sharingPeers.set(id, purposes);
     });
-    peers.forEach(({ id }) => {
-      if (state.isSharingScreen) callPeer(id, 'screen');
-      if (state.isSharingWebcam) callPeer(id, 'webcam');
-    });
+    // Decides SFU vs mesh for this join; onTransportDecided then sends
+    // whatever we're already sharing (a reconnect while sharing) on it.
+    beginTransport();
     // A reconnect gave us a new socket id, so sharers no longer remember what
     // we paused — start from a clean slate and re-send it if we're hidden.
     autoPausedKeys.clear();
@@ -678,8 +744,13 @@ export function initPeerSignaling(theSocket) {
     state.knownPeers.add(id);
     state.peerUsernames.set(id, username);
     state.peerVerified.set(id, Boolean(verified));
-    if (state.isSharingScreen) callPeer(id, 'screen');
-    if (state.isSharingWebcam) callPeer(id, 'webcam');
+    // Only the mesh needs an offer per newcomer — through the SFU they
+    // subscribe on their own, and while a join is deciding, onTransportDecided
+    // covers everyone already in knownPeers.
+    if (transportMode() === 'mesh') {
+      if (state.isSharingScreen) callPeer(id, 'screen');
+      if (state.isSharingWebcam) callPeer(id, 'webcam');
+    }
     showToast(`${username} entrou na sala`);
     refreshParticipants();
   });
