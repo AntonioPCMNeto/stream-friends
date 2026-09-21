@@ -661,9 +661,9 @@ main {
   .user-bar-wrap { left: 8px; bottom: 8px; }
 }
 
-/* Floating launcher (not in normal flow — see index.html), same corner the
-   chat panel itself opens in; hidden while the panel is open so the two
-   never overlap (see openPanel/closePanel in chat.js). */
+/* Floating launcher (not in normal flow — see index.html) for opening the
+   full-page chat from the streams view; hidden while the chat is open (see
+   openPanel/closePanel in chat.js). */
 .chat-control {
   position: fixed;
   right: 20px;
@@ -708,34 +708,105 @@ main {
 }
 .chat-badge.hidden { display: none; }
 
-/* Fixed floating panel, not a dropdown — it needs to stay open while you
-   click around the rest of the room (see chat.js), so it can't share the
-   participants/share panels' "close on outside click" behavior. */
+/* Full-page text channel view. Only ever visible with body.chat-mode (set by
+   chat.js), which turns the page into a viewport-tall column — see the
+   body.chat-mode rules below — so this simply fills whatever is left under
+   the room bar. The video grid (.room-content) is hidden, not torn down, so
+   streams keep playing (audio included) while you read. */
 .chat-panel {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 42;
-  width: 320px;
-  max-width: calc(100vw - 40px);
-  height: 420px;
-  max-height: calc(100vh - 40px);
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: 1340px;
+  margin: 16px auto 0;
   display: flex;
   flex-direction: column;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
 }
 .chat-panel.hidden { display: none; }
 .chat-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  gap: 12px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+}
+.chat-title {
+  font-size: 15px;
   font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-streams-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.chat-streams-btn:hover { color: var(--text); border-color: var(--accent); }
+.chat-streams-btn.live { color: var(--text); border-color: var(--danger); }
+.chat-streams-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.chat-streams-count.hidden { display: none; }
+
+body.chat-mode {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+body.chat-mode .app-header { padding: 10px 32px 8px; font-size: 20px; }
+body.chat-mode .app-footer { padding: 6px 32px 8px; }
+body.chat-mode #appShell { flex: 1; min-height: 0; }
+/* The sidebars are sticky with a viewport-based max-height; in this fixed
+   column their share is the shell's height instead. */
+body.chat-mode .server-rail,
+body.chat-mode #serverSidebar,
+body.chat-mode .member-list { max-height: calc(100% - 32px); }
+body.chat-mode main {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: 16px;
+}
+body.chat-mode #appScreen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+body.chat-mode .room-bar { width: 100%; }
+body.chat-mode .room-content { display: none; }
+/* The fixed bottom-left user bar sits on top of the message box whenever
+   nothing (no sidebar for guests, or the off-canvas breakpoint below) pushes
+   the content to its right, so leave it room. */
+body.chat-mode #serverSidebar.hidden ~ main { padding-bottom: 88px; }
+@media (max-width: 880px) {
+  body.chat-mode main { padding-bottom: 88px; }
 }
 .chat-close-btn {
   background: none;

@@ -279,14 +279,18 @@
         </button>
       </div>
 
+      <!-- Discord-style text channel view: while open (chat.js adds
+           body.chat-mode) it takes over the whole content area, and the
+           Streams button is the way back to the video grid — reachable
+           whether or not you're in voice. -->
       <div id="chatPanel" class="chat-panel hidden">
         <div class="chat-panel-header">
-          <span>Chat</span>
-          <button id="chatCloseBtn" class="chat-close-btn" aria-label="Fechar chat">✕</button>
+          <span id="chatTitle" class="chat-title">Chat</span>
+          <button id="chatStreamsBtn" class="chat-streams-btn" title="Voltar para os streams" aria-label="Ver streams">📺 Streams <span id="chatStreamsCount" class="chat-streams-count hidden">0</span></button>
         </div>
         <div id="chatMessages" class="chat-messages"></div>
         <div class="chat-input-row">
-          <input id="chatInput" type="text" placeholder="Mensagem..." maxlength="500">
+          <input id="chatInput" type="text" placeholder="Mensagem..." maxlength="500" autocomplete="off">
           <button id="chatSendBtn" class="btn btn-primary">Enviar</button>
         </div>
       </div>
