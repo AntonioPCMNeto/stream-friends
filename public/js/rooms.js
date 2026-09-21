@@ -23,6 +23,25 @@ export async function listMyRooms() {
   return data || [];
 }
 
+// The latest messages of a channel, oldest first. RLS scopes this to servers
+// you're a member of, so a guest (or a room code that isn't a channel) just
+// gets []. Never throws: history is a nicety, live chat works without it.
+export async function listMessages(channelId, limit) {
+  const supabase = getClient();
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('messages')
+    .select('username, body, created_at')
+    .eq('channel_id', channelId)
+    .order('id', { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error('Failed to load chat history:', error);
+    return [];
+  }
+  return (data || []).reverse();
+}
+
 // Returns { room } on success or { error } — never throws, same
 // error-string convention as auth.js's signIn/signUp.
 export async function createRoom(name) {

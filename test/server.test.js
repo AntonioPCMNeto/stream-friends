@@ -166,6 +166,21 @@ test('chat-message is echoed to the sender and carries the channelId', async () 
   alice.close();
 });
 
+test('chat-message is still delivered when a token is attached and storage is unavailable', async () => {
+  const alice = await connect();
+  alice.emit('join-room', { roomId: 'chat-room-d', username: 'Alice', accessToken: 'not-a-real-token' });
+  await wait(100);
+
+  const received = new Promise((resolve) => alice.once('chat-message', resolve));
+  alice.emit('chat-message', { channelId: 'chat-room-d', text: 'still here', accessToken: 'not-a-real-token' });
+  const msg = await received;
+
+  assert.strictEqual(msg.text, 'still here');
+  assert.strictEqual(msg.username, 'Alice');
+
+  alice.close();
+});
+
 test('view-channel lets a socket read a channel it never entered via join-room', async () => {
   const alice = await connect();
   const bob = await connect();

@@ -1,12 +1,20 @@
 import { buildAvatar, colorForName } from './identity.js';
+import { getIdentity } from './auth.js';
+import { listMessages } from './rooms.js';
 
 const MAX_MESSAGE_LENGTH = 500;
+const HISTORY_LIMIT = 50;
+const HISTORY_TIMEOUT_MS = 4000;
+const HISTORY_DEDUPE_WINDOW_MS = 5000;
 
 const toggleBtn = document.getElementById('chatToggleBtn');
 const launcher = document.querySelector('.chat-control');
 const badge = document.getElementById('chatBadge');
 const panel = document.getElementById('chatPanel');
-const closeBtn = document.getElementById('chatCloseBtn');
+const titleEl = document.getElementById('chatTitle');
+const streamsBtn = document.getElementById('chatStreamsBtn');
+const streamsCountEl = document.getElementById('chatStreamsCount');
+const videosEl = document.getElementById('videos');
 const messagesEl = document.getElementById('chatMessages');
 const input = document.getElementById('chatInput');
 const sendBtn = document.getElementById('chatSendBtn');
@@ -28,7 +36,20 @@ const GROUP_WINDOW_MS = 5 * 60 * 1000;
 let lastAuthor = null;
 let lastMessageTs = 0;
 
+// Bumped on every channel switch so a slow history fetch for a channel you've
+// already left can't render into the new one. `pendingLive` holds messages
+// that arrive while the fetch is in flight (null = not loading).
+let historyLoad = 0;
+let pendingLive = null;
+
 function isOpen() { return !panel.classList.contains('hidden'); }
+export const isChatOpen = isOpen;
+
+// lobby.js highlights the active channel row from this — the chat being open
+// or closed decides whether a text channel or the voice room is "on screen".
+function announceVisibility() {
+  document.dispatchEvent(new CustomEvent('chat-visibility'));
+}
 
 function setUnread(count) {
   unreadCount = count;
@@ -36,34 +57,82 @@ function setUnread(count) {
   badge.classList.toggle('hidden', count === 0);
 }
 
-// Unlike the participants/share dropdowns, the chat panel does NOT close on
-// an outside click — you're meant to keep it open while watching a share and
-// clicking tile controls; auto-closing on every click elsewhere would make
-// it unusable mid-conversation. It only closes via its own toggle/close
-// button or Escape.
+// The chat is a full-page view (body.chat-mode, see style.css) that replaces
+// the video grid rather than floating over it; it only closes via its
+// Streams button, the launcher, Escape, or a sidebar click on the voice room.
+// The grid is hidden, not removed, so streams keep playing underneath.
 function openPanel() {
   panel.classList.remove('hidden');
-  launcher.classList.add('hidden'); // the panel opens in the launcher's own corner
+  document.body.classList.add('chat-mode');
+  launcher.classList.add('hidden');
   setUnread(0);
+  // Messages appended while the panel was hidden had no layout to scroll.
+  messagesEl.scrollTop = messagesEl.scrollHeight;
   input.focus();
+  announceVisibility();
 }
 function closePanel() {
+  const wasOpen = isOpen();
   panel.classList.add('hidden');
+  document.body.classList.remove('chat-mode');
   launcher.classList.remove('hidden');
+  if (wasOpen) announceVisibility();
+}
+
+// Back to the video grid — used by the Streams button and by lobby.js when
+// you click the voice room you're already in.
+export const showStreams = closePanel;
+
+// Streams are whatever tiles are in the grid (remote shares/webcams plus your
+// own previews), independent of whether you're in voice.
+function updateStreamsButton() {
+  const count = videosEl.children.length;
+  streamsCountEl.textContent = String(count);
+  streamsCountEl.classList.toggle('hidden', count === 0);
+  streamsBtn.classList.toggle('live', count > 0);
 }
 
 // Called from lobby.js on every entry/channel switch AND every peek at a
 // different channel's chat (see peekChannelChat) — points the panel at
 // channelId and relabels the input Discord-style ("Enviar mensagem para
-// #canal"). Clears the pane rather than trying to keep scrollback per
-// channel, since the server doesn't persist messages anyway — there's
-// nothing to restore when you peek back later regardless.
+// #canal"). Clears the pane and reloads that channel's stored history (empty
+// for guests and for rooms that aren't a server channel).
 export function setViewingChannel(channelId, label) {
   viewingChannelId = channelId;
   input.placeholder = `Enviar mensagem para ${label}`;
+  titleEl.textContent = label;
   messagesEl.innerHTML = '';
   lastAuthor = null;
   lastMessageTs = 0;
+  loadHistory(channelId);
+}
+
+async function loadHistory(channelId) {
+  const load = ++historyLoad;
+  pendingLive = [];
+  // A paused/unreachable Supabase must never hold live messages back.
+  const timeout = new Promise((resolve) => setTimeout(() => resolve([]), HISTORY_TIMEOUT_MS));
+  const stored = await Promise.race([listMessages(channelId, HISTORY_LIMIT), timeout]);
+  if (load !== historyLoad) return;
+
+  const live = pendingLive;
+  pendingLive = null;
+  const history = stored.map(({ username, body, created_at }) => ({ username, text: body, ts: Date.parse(created_at) }));
+  history.forEach(({ username, text, ts }) => appendMessage(username, text, ts));
+
+  // The server stores a message right after broadcasting it, so one sent while
+  // the fetch was in flight can show up in both lists — each stored row
+  // cancels at most one live message.
+  const unmatched = [...history];
+  live.forEach((msg) => {
+    const dupe = unmatched.findIndex((row) => row.username === msg.username && row.text === msg.text
+      && Math.abs(row.ts - msg.ts) < HISTORY_DEDUPE_WINDOW_MS);
+    if (dupe !== -1) {
+      unmatched.splice(dupe, 1);
+      return;
+    }
+    appendMessage(msg.username, msg.text, msg.ts);
+  });
 }
 
 // Discord opens straight to the channel you clicked — used by
@@ -131,11 +200,15 @@ function appendMessage(username, text, ts) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-function sendMessage() {
+// The access token rides along so the server can store the message as this
+// account (see server.js persistChatMessage); guests just send no token.
+async function sendMessage() {
   const text = input.value.trim().slice(0, MAX_MESSAGE_LENGTH);
   if (!text || !viewingChannelId) return;
-  socket.emit('chat-message', { channelId: viewingChannelId, text });
+  const channelId = viewingChannelId;
   input.value = '';
+  const identity = await getIdentity().catch(() => null);
+  socket.emit('chat-message', { channelId, text, accessToken: identity?.accessToken });
 }
 
 // Called on leaving a room (lobby.js) — the socket reconnects with a fresh
@@ -147,6 +220,8 @@ export function clearChat() {
   lastAuthor = null;
   lastMessageTs = 0;
   viewingChannelId = null;
+  historyLoad++;
+  pendingLive = null;
 }
 
 export function initChat(theSocket) {
@@ -154,12 +229,15 @@ export function initChat(theSocket) {
 
   socket.on('chat-message', ({ channelId, username, text, ts }) => {
     if (channelId !== viewingChannelId) return; // e.g. your own room's chat arriving while you're peeking elsewhere
-    appendMessage(username, text, ts);
+    if (pendingLive) pendingLive.push({ username, text, ts });
+    else appendMessage(username, text, ts);
     if (!isOpen()) setUnread(unreadCount + 1);
   });
 
   toggleBtn.addEventListener('click', () => { isOpen() ? closePanel() : openPanel(); });
-  closeBtn.addEventListener('click', closePanel);
+  streamsBtn.addEventListener('click', closePanel);
+  new MutationObserver(updateStreamsButton).observe(videosEl, { childList: true });
+  updateStreamsButton();
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isOpen()) closePanel(); });
 
   sendBtn.addEventListener('click', sendMessage);

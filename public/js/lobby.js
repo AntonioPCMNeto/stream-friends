@@ -3,7 +3,7 @@ import { stopSharing, stopWebcam, initSegmented } from './share.js';
 import { closeAllPeerConnections } from './peers.js';
 import { refreshParticipants } from './participants.js';
 import { showToast } from './toast.js';
-import { clearChat, setViewingChannel, openPanelIfClosed } from './chat.js';
+import { clearChat, setViewingChannel, openPanelIfClosed, showStreams, isChatOpen } from './chat.js';
 import { resetVoice, joinVoice } from './voice.js';
 import * as auth from './auth.js';
 import * as rooms from './rooms.js';
@@ -285,24 +285,36 @@ let viewingChannelId = null;
 // Toggles which channel rows read as "active" without re-fetching the list
 // — peekChannelChat's job, since it doesn't touch selectedServer/channels
 // and a full refreshChannels() would be a pointless round trip just to move
-// a highlight. Voice rows still track state.roomId (the channel you're
-// actually connected to); only text rows follow the peekable viewingChannelId.
-function updateChannelActiveHighlight() {
-  textChannelsList.querySelectorAll('.my-server-row').forEach((row) => {
-    row.classList.toggle('active', row.dataset.channelId === viewingChannelId);
-  });
-  voiceChannelsList.querySelectorAll('.my-server-row').forEach((row) => {
-    row.classList.toggle('active', state.hasEntered && row.dataset.channelId === state.roomId);
-  });
+// a highlight. The chat is a full-page view: while it's open the text row
+// you're reading is the active one, otherwise the streams grid is on screen
+// and the row of the room you're connected to is.
+function isTextRowActive(channelId) {
+  return isChatOpen() && channelId === viewingChannelId;
 }
 
-// Clicking a text channel while connected to voice elsewhere (screen share,
+function isRoomRowActive(channelId) {
+  return state.hasEntered && !isChatOpen() && channelId === state.roomId;
+}
+
+function updateChannelActiveHighlight() {
+  textChannelsList.querySelectorAll('.my-server-row').forEach((row) => {
+    row.classList.toggle('active', isTextRowActive(row.dataset.channelId));
+  });
+  voiceChannelsList.querySelectorAll('.my-server-row').forEach((row) => {
+    row.classList.toggle('active', isRoomRowActive(row.dataset.channelId));
+  });
+}
+document.addEventListener('chat-visibility', updateChannelActiveHighlight);
+
+// Clicking a text channel while you're already in a room (screen share,
 // webcam, the room-bar, the participant list — none of that is tied to
-// whichever channel's chat you're peeking at) shouldn't cost you that call.
-// Only text channels support this: a voice channel row always means "join
-// this call", since you can't meaningfully be in two at once.
+// whichever channel's chat you're reading) shouldn't cost you that room, in
+// voice or not: it only swaps the chat, so the streams stay one click away
+// (the chat's Streams button). Only text channels support this: a voice
+// channel row always means "join this call", since you can't meaningfully be
+// in two at once.
 function peekChannelChat(channel) {
-  if (viewingChannelId === channel.id) { closeSidebarOnMobile(); return; }
+  if (viewingChannelId === channel.id) { openPanelIfClosed(); closeSidebarOnMobile(); return; }
   viewingChannelId = channel.id;
   socket.emit('view-channel', { channelId: channel.id });
   setViewingChannel(channel.id, `#${channel.name}`);
@@ -528,7 +540,7 @@ function buildTextChannelRow(channel) {
   const row = document.createElement('div');
   row.className = 'my-server-row';
   row.dataset.channelId = channel.id;
-  row.classList.toggle('active', channel.id === viewingChannelId);
+  row.classList.toggle('active', isTextRowActive(channel.id));
   row.tabIndex = 0;
   row.setAttribute('role', 'button');
   const hash = document.createElement('span');
@@ -539,13 +551,15 @@ function buildTextChannelRow(channel) {
   name.className = 'row-label';
   name.textContent = channel.name;
   row.appendChild(name);
-  // In voice elsewhere -> just peek at this channel's chat, don't drop the
-  // call. Not in voice -> same full switch as any other channel.
+  // Already in a room -> just read this channel's chat, don't drop the room
+  // (its streams, your share, the call). Not in one yet -> enter it, landing
+  // on the chat.
   const activateRow = () => {
-    if (state.isInVoice) {
+    if (state.hasEntered) {
       peekChannelChat(channel);
     } else {
       joinRoom(channel.id, `#${channel.name}`);
+      openPanelIfClosed();
       closeSidebarOnMobile();
     }
   };
@@ -571,7 +585,7 @@ function buildVoiceChannelRow(channel) {
   const row = document.createElement('div');
   row.className = 'my-server-row';
   row.dataset.channelId = channel.id;
-  row.classList.toggle('active', state.hasEntered && channel.id === state.roomId);
+  row.classList.toggle('active', isRoomRowActive(channel.id));
   row.tabIndex = 0;
   row.setAttribute('role', 'button');
   const icon = document.createElement('span');
@@ -583,6 +597,14 @@ function buildVoiceChannelRow(channel) {
   name.textContent = channel.name;
   row.appendChild(name);
   const activateRow = () => {
+    // Already in this room (e.g. reading a text channel from it): clicking it
+    // is the way back to its streams, not a rejoin that would drop them.
+    if (state.hasEntered && state.roomId === channel.id) {
+      showStreams();
+      closeSidebarOnMobile();
+      if (!state.isInVoice) joinVoice();
+      return;
+    }
     joinRoom(channel.id, `🔊 ${channel.name}`);
     closeSidebarOnMobile();
     joinVoice();
@@ -747,6 +769,7 @@ function joinRoom(roomId, displayLabel = roomId) {
   viewingChannelId = roomId; // entering a room always resets any peeked-at channel back to this one
   setViewingChannel(roomId, displayLabel);
   refreshParticipants();
+  updateChannelActiveHighlight();
 
   lobby.classList.add('hidden');
   appScreen.classList.remove('hidden');

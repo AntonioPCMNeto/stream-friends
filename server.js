@@ -135,6 +135,25 @@ function isValidChatMessage(text) {
   return typeof text === 'string' && text.trim().length > 0 && text.length <= MAX_CHAT_MESSAGE_LENGTH;
 }
 
+// Stores a chat message as the account that sent it, through the post_message
+// RPC (see supabase/migrations/0003_messages.sql) called with the sender's own
+// token so RLS/auth.uid() decide whether they may post there. Best-effort by
+// design: the message was already broadcast, so a failure (or a guest, or a
+// room that isn't a server channel) only means it won't be in the history.
+async function persistChatMessage(channelId, text, accessToken) {
+  if (!supabase || !isValidAccessToken(accessToken)) return;
+  try {
+    const asUser = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { error } = await asUser.rpc('post_message', { target_channel_id: channelId, body: text });
+    if (error) console.error('Failed to store chat message:', error.message);
+  } catch (err) {
+    console.error('Failed to store chat message:', err);
+  }
+}
+
 function isValidPurpose(purpose) {
   return PURPOSES.includes(purpose);
 }
@@ -177,6 +196,9 @@ io.on('connection', (socket) => {
     socket.join(`chat:${roomId}`);
     socket.data.roomId = roomId;
     socket.data.username = finalUsername;
+    // Fallback for persisting chat from clients that don't send a fresh token
+    // with each message (older builds); it expires, per-message tokens don't.
+    socket.data.accessToken = account ? accessToken : null;
 
     if (!rooms.has(roomId)) rooms.set(roomId, new Map());
     const room = rooms.get(roomId);
@@ -321,11 +343,12 @@ io.on('connection', (socket) => {
   // client tells its own messages apart from others' by comparing `from` to
   // its own socket id. The room-membership check is what stops a client
   // from posting into a channel it hasn't actually joined or peeked at.
-  socket.on('chat-message', ({ channelId, text }) => {
+  socket.on('chat-message', ({ channelId, text, accessToken }) => {
     const { username } = socket.data;
     if (!isValidRoomId(channelId) || !isValidChatMessage(text) || !username) return;
     if (!socket.rooms.has(`chat:${channelId}`)) return;
     io.to(`chat:${channelId}`).emit('chat-message', { channelId, from: socket.id, username, text: text.trim(), ts: Date.now() });
+    persistChatMessage(channelId, text.trim(), isValidAccessToken(accessToken) ? accessToken : socket.data.accessToken);
   });
 
   socket.on('disconnect', () => {
