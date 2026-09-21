@@ -5,7 +5,7 @@ import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 import {
   initSfu, beginTransport, disconnectSfu, transportMode, transportDecided,
-  publishStream, unpublishStream, replacePublishedStream, getPublishedVideoSender,
+  publishStream, unpublishStream, replacePublishedStream, getPublishedVideoSender, AUTO_BITRATE_KBPS,
   hasSfuViewers, sfuViewerCount, setSfuWatching, collectSfuStats,
 } from './sfu.js';
 
@@ -267,7 +267,8 @@ function applyEncodingParams(sender, purpose) {
   if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
   const enc = params.encodings[0];
   const { kbps: bitrateKbps, fps: framerateFps } = encodingTarget(purpose);
-  enc.maxBitrate = bitrateKbps ? bitrateKbps * 1000 : undefined;
+  const cappedKbps = bitrateKbps || (outgoingVia[purpose] === 'sfu' ? AUTO_BITRATE_KBPS : null);
+  enc.maxBitrate = cappedKbps ? cappedKbps * 1000 : undefined;
   enc.maxFramerate = framerateFps || undefined;
   enc.scaleResolutionDownBy = 1;
   enc.networkPriority = 'high';

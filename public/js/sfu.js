@@ -13,7 +13,7 @@ import { showToast } from './toast.js';
 const LIVEKIT_MODULE = '../vendor/livekit-client.esm.mjs';
 const TOKEN_TIMEOUT_MS = 3000;
 // "Auto" means no cap in the mesh; LiveKit wants a number, so use the highest preset.
-const AUTO_BITRATE_KBPS = 50000;
+export const AUTO_BITRATE_KBPS = 15000;
 
 let socket = null;
 let hooks = { encodingTarget: () => ({ kbps: null, fps: null }), onDecided: () => {}, preferHardwareH264: () => {} };
