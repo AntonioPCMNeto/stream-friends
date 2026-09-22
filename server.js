@@ -78,6 +78,21 @@ const io = new Server(server, {
   cors: { origin: '*' },
 });
 
+// Baseline response headers. Deliberately not a full CSP: SUPABASE_URL and
+// LIVEKIT_URL are only known at runtime (env vars) and the web build imports
+// supabase-js from a CDN (see auth.js) — getting a CSP's allowlist wrong
+// there fails closed (breaks auth/streaming) rather than open, so that needs
+// its own careful pass with live verification, not a drive-by add here.
+// Electron never requests pages from this server (loadFile() via file://,
+// with its own CSP baked into index.html), so none of this touches it.
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 // Serve static frontend files
 app.use(express.static('public'));
 
@@ -158,6 +173,20 @@ function isValidPurpose(purpose) {
   return PURPOSES.includes(purpose);
 }
 
+// Small per-socket, per-event sliding-window limiter — independent buckets so
+// a burst on one event (e.g. ICE candidates trickling in on 'signal') can
+// never starve another (e.g. 'chat-message'). Thresholds below are sized off
+// real worst-case legitimate bursts, not typical usage, specifically so this
+// never trips during normal use — it's here for abuse/flood cases only.
+function rateLimited(socket, bucket, max, windowMs) {
+  socket.data.rateLimits ??= new Map();
+  const now = Date.now();
+  const recent = (socket.data.rateLimits.get(bucket) || []).filter((t) => now - t < windowMs);
+  recent.push(now);
+  socket.data.rateLimits.set(bucket, recent);
+  return recent.length > max;
+}
+
 // Who's currently in voice in a given channel (= roomId here — see the
 // `rooms` map above; "room" in this file is "channel" in the UI/DB sense).
 // Used both for a new sidebar watcher's initial snapshot and for live
@@ -178,6 +207,10 @@ io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('join-room', async ({ roomId, username, clientId, accessToken }) => {
+    // A channel switch disconnects+reconnects the socket and rejoins on
+    // 'connect' (see lobby.js), so a fast round of switching is legitimate —
+    // sized well above that, this is only for a scripted join-spam loop.
+    if (rateLimited(socket, 'join-room', 20, 10000)) return;
     if (!isValidRoomId(roomId) || !isValidUsername(username)) return;
     const safeClientId = isValidClientId(clientId) ? clientId : null;
 
@@ -249,6 +282,12 @@ io.on('connection', (socket) => {
   // sender's two peer connections (screen/webcam) this signal belongs to,
   // relayed as-is so the recipient can route it to the matching connection.
   socket.on('signal', ({ to, purpose, data }) => {
+    // Trickle ICE alone can legitimately fire dozens of these per new peer
+    // connection, multiplied by every purpose/peer a busy room join sets up
+    // at once — sized well above that worst case so real WebRTC negotiation
+    // is never the thing that trips this; it's here for a flood aimed at one
+    // target.
+    if (rateLimited(socket, 'signal', 400, 10000)) return;
     const targetSocket = io.sockets.sockets.get(to);
     if (!targetSocket || !socket.data.roomId || targetSocket.data.roomId !== socket.data.roomId) return;
     if (!isValidPurpose(purpose)) return;
@@ -256,6 +295,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('share-status', ({ purpose, isSharing }) => {
+    if (rateLimited(socket, 'share-status', 30, 10000)) return;
     const { roomId } = socket.data;
     const room = roomId && rooms.get(roomId);
     const info = room && room.get(socket.id);
@@ -275,6 +315,7 @@ io.on('connection', (socket) => {
   // diff) since a channel switch fully reconnects the socket anyway,
   // wiping any previous 'watch:' room membership.
   socket.on('watch-server', ({ channelIds }) => {
+    if (rateLimited(socket, 'watch-server', 20, 10000)) return;
     if (!Array.isArray(channelIds)) return;
     const validIds = channelIds.filter(isValidRoomId).slice(0, 200);
 
@@ -291,6 +332,9 @@ io.on('connection', (socket) => {
   // tells the client to use the peer-to-peer mesh instead.
   socket.on('livekit-token', async (ack) => {
     if (typeof ack !== 'function') return;
+    // Requested on every (re)join — a fast run of channel switches can fire
+    // this a few times in a row legitimately; sized above that.
+    if (rateLimited(socket, 'livekit-token', 15, 10000)) return;
     const { roomId, username } = socket.data;
     if (!livekitEnabled || !roomId) return ack({ enabled: false });
     try {
@@ -312,6 +356,7 @@ io.on('connection', (socket) => {
   // room-scoped target check as 'signal' — a client can only address peers
   // in its own room.
   socket.on('watch-status', ({ to, purpose, watching }) => {
+    if (rateLimited(socket, 'watch-status', 60, 10000)) return;
     const targetSocket = io.sockets.sockets.get(to);
     if (!targetSocket || !socket.data.roomId || targetSocket.data.roomId !== socket.data.roomId) return;
     if (!isValidPurpose(purpose)) return;
@@ -330,6 +375,7 @@ io.on('connection', (socket) => {
   // current set, not a diff) but never drops the socket's own room's chat
   // feed, same as watch-server's pattern for the same reason.
   socket.on('view-channel', ({ channelId }) => {
+    if (rateLimited(socket, 'view-channel', 30, 10000)) return;
     if (!isValidRoomId(channelId)) return;
     const ownChatRoom = socket.data.roomId ? `chat:${socket.data.roomId}` : null;
     [...socket.rooms].filter((r) => r.startsWith('chat:') && r !== ownChatRoom).forEach((r) => socket.leave(r));
@@ -344,6 +390,7 @@ io.on('connection', (socket) => {
   // its own socket id. The room-membership check is what stops a client
   // from posting into a channel it hasn't actually joined or peeked at.
   socket.on('chat-message', ({ channelId, text, accessToken }) => {
+    if (rateLimited(socket, 'chat-message', 15, 10000)) return;
     const { username } = socket.data;
     if (!isValidRoomId(channelId) || !isValidChatMessage(text) || !username) return;
     if (!socket.rooms.has(`chat:${channelId}`)) return;
