@@ -14,6 +14,11 @@ const LIVEKIT_MODULE = '../vendor/livekit-client.esm.mjs';
 const TOKEN_TIMEOUT_MS = 3000;
 // "Auto" means no cap in the mesh; LiveKit wants a number, so use the highest preset.
 export const AUTO_BITRATE_KBPS = 15000;
+// Firefox's only H.264 codec is OpenH264 (Baseline, no hardware path) — see
+// the matching const in peers.js. Used below to keep Firefox off the
+// High/Main profiles the SFU steers Chromium encoders toward (it can't
+// decode them) and off a primary codec it has no hardware encoder for.
+const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
 
 let socket = null;
 let hooks = { encodingTarget: () => ({ kbps: null, fps: null }), onDecided: () => {}, preferHardwareH264: () => {} };
@@ -201,9 +206,19 @@ function videoPublishOptions(purpose) {
   const encoding = { maxBitrate: (kbps || AUTO_BITRATE_KBPS) * 1000, maxFramerate: fps || undefined, priority: 'high' };
   return {
     source: isScreen ? lk.Track.Source.ScreenShare : lk.Track.Source.Camera,
-    // Hardware-encodable on every GPU vendor, same reasoning as preferHardwareH264 in peers.js.
-    videoCodec: 'h264',
-    backupCodec: false,
+    // Hardware-encodable on every GPU vendor, same reasoning as preferHardwareH264
+    // in peers.js — except Firefox, which has no hardware H.264 path at all
+    // (OpenH264 is software-only), so it publishes VP8 instead of fighting it.
+    videoCodec: IS_FIREFOX ? 'vp8' : 'h264',
+    // The SFU forwards whatever the publisher encoded, unchanged, to every
+    // subscriber — it does not transcode. A Chromium publisher gets steered
+    // toward H.264 High/Main profile for hardware encoding (sfuH264Score in
+    // peers.js), which Firefox's Baseline-only OpenH264 decoder can't decode
+    // at all: without a backup codec that was a silent black tile for every
+    // Firefox viewer. This gives the SFU a VP8 layer to hand them instead.
+    // (Skipped when we're already publishing VP8 as the primary — nothing to
+    // back it up with.)
+    backupCodec: IS_FIREFOX ? false : { codec: 'vp8' },
     // One layer: the point of the SFU is one encode, and a viewer that can't
     // keep up should lower the resolution via 'maintain-framerate', not switch layers.
     simulcast: false,

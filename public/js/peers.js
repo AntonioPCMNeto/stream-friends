@@ -11,6 +11,13 @@ import {
 
 const PURPOSES = ['screen', 'webcam'];
 
+// Firefox's only H.264 encoder/decoder is OpenH264 (Baseline profile, no
+// hardware path) — none of the hardware-profile steering below applies to
+// it, and forcing its own Baseline entries to the front buys nothing over
+// Firefox's default codec order. (sfu.js has its own copy of this check —
+// importing across the two would create a circular import.)
+const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
+
 // Fixed encoding target for webcam sends — unlike screen sharing there's no
 // quality panel for it (a facecam doesn't benefit from screen-share-grade
 // resolution/bitrate controls), so these just need to be reasonable.
@@ -327,6 +334,7 @@ function sfuH264Score(c) {
 }
 
 function preferHardwareH264(pc, sender, h264Score = meshH264Score) {
+  if (IS_FIREFOX) return; // no hardware profiles to steer toward — see IS_FIREFOX above
   const transceiver = pc.getTransceivers().find((t) => t.sender === sender);
   if (!transceiver?.setCodecPreferences) return;
   const caps = RTCRtpSender.getCapabilities('video');
