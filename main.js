@@ -45,6 +45,14 @@ function createWindow() {
     console.log(`renderer console [${level}]:`, message, `(${sourceId}:${lineNumber})`);
   });
 
+  // The app never opens external links or navigates away from its own
+  // index.html (no window.open/target=_blank anywhere in the codebase), so
+  // both are just denied outright rather than routed to shell.openExternal —
+  // nothing to preserve, and it closes off using either as a way to load
+  // arbitrary content into this window.
+  mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
   mainWindow.on('close', (event) => {
     if (quitting) return;
     event.preventDefault();
