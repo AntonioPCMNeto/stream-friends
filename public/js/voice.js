@@ -266,8 +266,12 @@ function setVoiceUI() {
   deafenBtn.setAttribute('aria-pressed', String(state.isDeafened));
   deafenBtn.title = state.isDeafened ? 'Desativar surdina' : 'Ensurdecer';
 
+  muteBtn.disabled = inVoice && !state.micStream;
+  if (muteBtn.disabled) muteBtn.title = 'Sem microfone';
+
   if (!inVoice) statusEl.textContent = 'Desconectado';
   else if (state.isDeafened) statusEl.textContent = '🔕 Ensurdecido';
+  else if (!state.micStream) statusEl.textContent = '🎧 Só ouvindo';
   else if (state.isMuted) statusEl.textContent = '🔇 Silenciado';
   else statusEl.textContent = '🎧 Em áudio';
 
@@ -419,6 +423,9 @@ async function connectToPeer(peerId) {
   const pc = createVoicePc(peerId);
   addMicTrack(pc);
   if (socket.id < peerId) {
+    // Listen-only offerer still needs an audio m-line, or the peer has
+    // nothing to send us audio on. (An answerer gets one from the offer.)
+    if (!state.micStream) pc.addTransceiver('audio', { direction: 'recvonly' });
     try {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -535,8 +542,10 @@ async function switchMicDevice(deviceId) {
 function handleMicSelectChange() {
   const deviceId = micSelect.value;
   saveDevicePref(MIC_PREF_KEY, deviceId);
-  if (state.isInVoice) switchMicDevice(deviceId);
-  else currentMicDeviceId = deviceId;
+  currentMicDeviceId = deviceId;
+  if (!state.isInVoice) return;
+  if (state.micStream) switchMicDevice(deviceId);
+  else showToast('Saia e entre no áudio de novo para usar o microfone.');
 }
 
 function handleSpeakerSelectChange() {
@@ -549,41 +558,37 @@ function handleSpeakerSelectChange() {
 // row is clicked, the same way clicking joinBtn does below.
 export async function joinVoice() {
   if (state.isInVoice) return;
-  if (!navigator.mediaDevices?.getUserMedia) {
-    showToast('Microfone não é suportado neste navegador/dispositivo.', 'error');
-    return;
-  }
-
-  let stream;
+  let stream = null;
   try {
     stream = await captureMic(currentMicDeviceId);
   } catch (err) {
     // The saved device (e.g. unplugged since last time) may simply no longer
     // exist — retry against whatever the OS considers default before giving
     // up, same as a fresh install would.
+    let failure = err;
     if (currentMicDeviceId !== 'default') {
       try {
         stream = await captureMic('default');
         currentMicDeviceId = 'default';
         saveDevicePref(MIC_PREF_KEY, 'default');
       } catch (err2) {
-        console.error('Failed to capture microphone:', err2);
-        showToast('Não foi possível acessar o microfone.', 'error');
-        return;
+        failure = err2;
       }
-    } else {
-      console.error('Failed to capture microphone:', err);
+    }
+    if (!stream) {
+      // No usable mic (none plugged in, or permission denied) — join
+      // listen-only instead of refusing.
+      console.error('Failed to capture microphone:', failure);
       showToast(
-        err.name === 'NotAllowedError'
-          ? 'Permissão de microfone negada.'
-          : 'Não foi possível acessar o microfone.',
+        failure.name === 'NotAllowedError'
+          ? 'Permissão de microfone negada. Entrando só para ouvir.'
+          : 'Nenhum microfone encontrado. Entrando só para ouvir.',
         'error'
       );
-      return;
     }
   }
 
-  stream = await applyNoiseSuppression(stream); // the raw capture above, now denoised (or unchanged, if unavailable)
+  if (stream) stream = await applyNoiseSuppression(stream); // the raw capture above, now denoised (or unchanged, if unavailable)
 
   state.micStream = stream;
   state.isInVoice = true;
@@ -595,7 +600,7 @@ export async function joinVoice() {
   populateSpeakerSelect();
   setVoiceUI();
   refreshParticipants();
-  showToast('Você entrou no áudio.');
+  if (stream) showToast('Você entrou no áudio.');
   playCue(playJoinSound);
 
   socket.emit('share-status', { purpose: 'voice', isSharing: true });
@@ -622,7 +627,7 @@ function leaveVoice({ silent = false } = {}) {
 }
 
 function toggleMute() {
-  if (!state.isInVoice) return;
+  if (!state.isInVoice || !state.micStream) return;
   state.isMuted = !state.isMuted;
   if (!state.isMuted && state.isDeafened) state.isDeafened = false; // unmuting lifts deafen, like Discord
   applyMicEnabled();
