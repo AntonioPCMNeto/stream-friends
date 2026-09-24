@@ -7,7 +7,7 @@ import { clearChat, setViewingChannel, openPanelIfClosed, showStreams, isChatOpe
 import { resetVoice, joinVoice } from './voice.js';
 import * as auth from './auth.js';
 import * as rooms from './rooms.js';
-import { buildAvatar } from './identity.js';
+import { buildAvatar, buildUserAvatar, setAvatarUrl } from './identity.js';
 
 const lobby = document.getElementById('lobby');
 const appScreen = document.getElementById('appScreen');
@@ -489,10 +489,11 @@ function sendWatchServer(channelIds) {
 
 function renderOccupants(el, occupants) {
   el.innerHTML = '';
-  occupants.forEach(({ username }) => {
+  occupants.forEach(({ username, avatar: avatarUrl }) => {
+    setAvatarUrl(username, avatarUrl);
     const row = document.createElement('div');
     row.className = 'voice-channel-occupant';
-    const avatar = buildAvatar(username);
+    const avatar = buildUserAvatar(username);
     avatar.classList.add('avatar-sm');
     row.appendChild(avatar);
     const name = document.createElement('span');
@@ -689,7 +690,8 @@ function applyAuthUX() {
     authNotice.classList.add('hidden');
     authName.textContent = identity.username || 'Conta';
     authAvatar.innerHTML = '';
-    authAvatar.appendChild(buildAvatar(identity.username));
+    setAvatarUrl(identity.username, identity.avatarUrl);
+    authAvatar.appendChild(buildUserAvatar(identity.username));
     usernameInput.value = identity.username || '';
     acceptPendingInvite().finally(refreshMyServers);
   } else {
@@ -1067,7 +1069,13 @@ export async function initLobby(theSocket) {
   // Fires again on every future sign-in/sign-up/sign-out — keeps the UI and
   // auto-join in sync without needing to re-check manually after each one.
   auth.onIdentityChange((newIdentity) => {
+    const avatarChanged = Boolean(identity && newIdentity) && identity.avatarUrl !== newIdentity.avatarUrl;
     identity = newIdentity;
+    if (avatarChanged) {
+      setAvatarUrl(newIdentity.username, newIdentity.avatarUrl);
+      socket.emit('profile-updated', { accessToken: newIdentity.accessToken });
+      refreshParticipants();
+    }
     applyAuthUX();
     attemptAutoJoin();
   });

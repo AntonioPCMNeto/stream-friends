@@ -903,6 +903,9 @@ body.chat-mode #serverSidebar.hidden ~ main { padding-bottom: 88px; }
   box-shadow: 0 0 0 3px var(--speaking), 0 0 10px 2px color-mix(in srgb, var(--speaking) 65%, transparent);
 }
 .avatar-sm { width: 16px; height: 16px; font-size: 9px; }
+/* Own avatar in the lobby card and the user bar: click to change the picture. */
+.avatar-editable { cursor: pointer; }
+.avatar-editable:hover .avatar { filter: brightness(1.15); }
 
 .chat-message-meta {
   display: flex;

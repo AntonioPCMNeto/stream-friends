@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { buildAvatar } from './identity.js';
+import { buildUserAvatar } from './identity.js';
 
 const control = document.querySelector('.participants-control');
 const toggleBtn = document.getElementById('participantsBtn');
@@ -22,7 +22,7 @@ function buildRow(name, purposes, isMe, inVoice, peerId, verified) {
 
   const avatarWrap = document.createElement('span');
   avatarWrap.className = 'avatar-wrap';
-  avatarWrap.appendChild(buildAvatar(name));
+  avatarWrap.appendChild(buildUserAvatar(name));
   const dot = document.createElement('span');
   dot.className = 'status-dot status-dot-online';
   dot.title = 'Online';
@@ -93,7 +93,7 @@ export function refreshParticipants() {
 
   userBarName.textContent = state.myUsername || '';
   userBarAvatar.innerHTML = '';
-  if (state.myUsername) userBarAvatar.appendChild(buildAvatar(state.myUsername));
+  if (state.myUsername) userBarAvatar.appendChild(buildUserAvatar(state.myUsername));
 }
 
 // Toggles the speaking ring on a peer's avatar wherever it's currently

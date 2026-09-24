@@ -59,7 +59,11 @@ function translateError(message) {
 
 function toIdentity(session) {
   if (!session) return null;
-  return { accessToken: session.access_token, username: displayNameOf(session.user) };
+  return {
+    accessToken: session.access_token,
+    username: displayNameOf(session.user),
+    avatarUrl: session.user.user_metadata?.avatar_url || null,
+  };
 }
 
 // Resolves to null when not signed in (or Supabase isn't configured).
@@ -92,4 +96,32 @@ export async function signIn(email, password) {
 export async function signOut() {
   if (!supabase) return;
   await supabase.auth.signOut();
+}
+
+// Stores the picture under the account's own folder in the public "avatars"
+// bucket (see supabase/migrations/0004_avatars.sql) with a fresh file name each
+// time, so the old one can be dropped without CDN/browser caches serving it
+// again, and records its URL in the account's metadata — which is what the
+// server reads and relays to everyone else. Returns { error } like signIn.
+export async function uploadAvatar(blob) {
+  if (!supabase) return { error: 'Contas não estão configuradas neste servidor.' };
+  const { data } = await supabase.auth.getSession();
+  const user = data?.session?.user;
+  if (!user) return { error: 'Entre na sua conta para trocar a foto.' };
+
+  const path = `${user.id}/${Date.now()}.webp`;
+  const upload = await supabase.storage.from('avatars').upload(path, blob, { contentType: blob.type, cacheControl: '31536000' });
+  if (upload.error) return { error: 'Não foi possível enviar a foto. Tente de novo.' };
+
+  const { publicUrl } = supabase.storage.from('avatars').getPublicUrl(path).data;
+  const previous = user.user_metadata?.avatar_url;
+  const { error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, avatar_url: publicUrl } });
+  if (error) {
+    await supabase.storage.from('avatars').remove([path]);
+    return { error: 'Não foi possível salvar a foto. Tente de novo.' };
+  }
+
+  const previousPath = previous?.split('/avatars/')[1];
+  if (previousPath) supabase.storage.from('avatars').remove([previousPath]).catch(() => {});
+  return {};
 }
