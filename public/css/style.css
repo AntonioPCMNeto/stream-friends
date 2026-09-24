@@ -662,6 +662,9 @@ main {
 }
 #userBarSpeakerRow { margin-top: 14px; }
 #userBarSpeakerRow.hidden { display: none; }
+.user-bar-profile-row { margin-top: 14px; }
+.user-bar-profile-row.hidden { display: none; }
+.user-bar-profile-row .btn-link { margin: 0; text-align: left; }
 .user-bar-logout-row {
   margin-top: 14px;
   padding-top: 14px;
@@ -893,9 +896,16 @@ body.chat-mode #serverSidebar.hidden ~ main { padding-bottom: 88px; }
   box-shadow: 0 0 0 3px var(--speaking), 0 0 10px 2px color-mix(in srgb, var(--speaking) 65%, transparent);
 }
 .avatar-sm { width: 16px; height: 16px; font-size: 9px; }
-/* Own avatar in the lobby card and the user bar: click to change the picture. */
+/* Own avatar in the lobby card and the user bar: click to open the picture dialog. */
 .avatar-editable { cursor: pointer; }
 .avatar-editable:hover .avatar { filter: brightness(1.15); }
+.avatar-xl { width: 160px; height: 160px; font-size: 64px; }
+.profile-modal { width: 340px; }
+.profile-preview { display: flex; justify-content: center; margin-bottom: 14px; }
+.profile-modal-name { text-align: center; font-weight: 700; margin-bottom: 18px; }
+.profile-modal-actions { display: flex; gap: 8px; }
+.profile-modal-actions .btn { flex: 1; }
+.profile-modal-actions .btn.hidden { display: none; }
 
 .chat-message-meta {
   display: flex;

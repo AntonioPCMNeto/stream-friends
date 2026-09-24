@@ -28,6 +28,7 @@ const authAvatar = document.getElementById('authAvatar');
 const authName = document.getElementById('authName');
 const signOutBtn = document.getElementById('signOutBtn');
 const userBarLogoutRow = document.getElementById('userBarLogoutRow');
+const userBarProfileRow = document.getElementById('userBarProfileRow');
 const userBarLogoutBtn = document.getElementById('userBarLogoutBtn');
 const authForm = document.getElementById('authForm');
 const authUsernameField = document.getElementById('authUsernameField');
@@ -676,6 +677,7 @@ function applyAuthUX() {
   const signedIn = Boolean(identity);
   authStatus.classList.toggle('hidden', !signedIn);
   userBarLogoutRow.classList.toggle('hidden', !signedIn);
+  userBarProfileRow.classList.toggle('hidden', !signedIn);
   serverSidebar.classList.toggle('hidden', !signedIn);
   serverRail.classList.toggle('hidden', !signedIn);
   authDividerServers.classList.toggle('hidden', !signedIn);

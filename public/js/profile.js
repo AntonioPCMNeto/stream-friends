@@ -1,4 +1,5 @@
 import { getIdentity, uploadAvatar } from './auth.js';
+import { buildAvatar } from './identity.js';
 import { showToast } from './toast.js';
 
 const AVATAR_SIZE = 256;
@@ -22,12 +23,74 @@ async function toAvatarBlob(file) {
 
 export function initProfilePicture() {
   const input = document.getElementById('avatarFileInput');
-  const triggers = document.querySelectorAll('.avatar-editable');
+  const backdrop = document.getElementById('profileModalBackdrop');
+  const preview = document.getElementById('profilePreview');
+  const nameEl = document.getElementById('profileModalName');
+  const chooseBtn = document.getElementById('profileChooseBtn');
+  const saveBtn = document.getElementById('profileSaveBtn');
+  const cancelBtn = document.getElementById('profileCancelBtn');
+  const settingsBtn = document.getElementById('userBarSettingsBtn');
+  const settingsPopover = document.getElementById('userBarPopover');
 
-  triggers.forEach((el) => el.addEventListener('click', async () => {
-    if (await getIdentity()) input.click();
-    else showToast('Entre na sua conta para trocar a foto.', 'error');
-  }));
+  let identity = null;
+  let pendingBlob = null;
+  let pendingUrl = null;
+
+  function showCurrent() {
+    if (pendingUrl) URL.revokeObjectURL(pendingUrl);
+    pendingBlob = pendingUrl = null;
+    preview.innerHTML = '';
+    const avatar = buildAvatar(identity.username, identity.avatarUrl);
+    avatar.classList.add('avatar-xl');
+    preview.appendChild(avatar);
+    chooseBtn.classList.remove('hidden');
+    saveBtn.classList.add('hidden');
+    cancelBtn.classList.add('hidden');
+  }
+
+  function showPending(blob) {
+    pendingBlob = blob;
+    pendingUrl = URL.createObjectURL(blob);
+    preview.innerHTML = '';
+    const avatar = buildAvatar(identity.username, pendingUrl);
+    avatar.classList.add('avatar-xl');
+    preview.appendChild(avatar);
+    chooseBtn.classList.add('hidden');
+    saveBtn.classList.remove('hidden');
+    cancelBtn.classList.remove('hidden');
+  }
+
+  function closeModal() {
+    backdrop.classList.add('hidden');
+    if (pendingUrl) URL.revokeObjectURL(pendingUrl);
+    pendingBlob = pendingUrl = null;
+  }
+
+  async function openModal() {
+    identity = await getIdentity();
+    if (!identity) {
+      showToast('Entre na sua conta para ter uma foto de perfil.', 'error');
+      return;
+    }
+    nameEl.textContent = identity.username;
+    showCurrent();
+    backdrop.classList.remove('hidden');
+  }
+
+  document.querySelectorAll('.avatar-editable').forEach((el) => el.addEventListener('click', openModal));
+  document.getElementById('userBarProfileBtn').addEventListener('click', () => {
+    if (!settingsPopover.classList.contains('hidden')) settingsBtn.click();
+    openModal();
+  });
+
+  document.getElementById('profileModalCloseBtn').addEventListener('click', closeModal);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !backdrop.classList.contains('hidden')) closeModal();
+  });
+
+  chooseBtn.addEventListener('click', () => input.click());
+  cancelBtn.addEventListener('click', showCurrent);
 
   input.addEventListener('change', async () => {
     const file = input.files[0];
@@ -49,9 +112,18 @@ export function initProfilePicture() {
       showToast('Seu navegador não conseguiu preparar a imagem.', 'error');
       return;
     }
+    showPending(blob);
+  });
 
-    const { error } = await uploadAvatar(blob);
-    if (error) showToast(error, 'error');
-    else showToast('Foto de perfil atualizada!');
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    const { error } = await uploadAvatar(pendingBlob);
+    saveBtn.disabled = false;
+    if (error) {
+      showToast(error, 'error');
+      return;
+    }
+    showToast('Foto de perfil atualizada!');
+    closeModal();
   });
 }
