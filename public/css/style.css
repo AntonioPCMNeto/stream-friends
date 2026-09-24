@@ -79,6 +79,19 @@ main {
   padding: 0 20px 60px;
 }
 
+/* The lobby card is centered in <main>, which sits right of the server rail
+   + sidebar (76px + 276px), so it looked off-center against the window and
+   the header. Reserve the same footprint on its right so it centers on the
+   viewport, shrinking to whatever still fits the 380px card. */
+#appShell:has(.server-rail:not(.hidden)) main:has(#lobby:not(.hidden)) {
+  padding-right: clamp(0px, calc(100vw - 772px), 352px);
+}
+@media (max-width: 880px) {
+  #appShell:has(.server-rail:not(.hidden)) main:has(#lobby:not(.hidden)) {
+    padding-right: clamp(0px, calc(100vw - 496px), 76px);
+  }
+}
+
 .btn {
   height: 38px;
   padding: 0 18px;
