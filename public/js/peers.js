@@ -3,6 +3,7 @@ import { state } from './state.js';
 import { renderTiles, updateTileStats, isStatsVisible, isLocalPreviewOn, isManuallyHidden } from './tiles.js';
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
+import { setAvatarUrl } from './identity.js';
 import {
   initSfu, beginTransport, disconnectSfu, transportMode, transportDecided,
   publishStream, unpublishStream, replacePublishedStream, getPublishedVideoSender, AUTO_BITRATE_KBPS,
@@ -778,9 +779,10 @@ export function initPeerSignaling(theSocket) {
   // toasts) — this is a one-time dump of everyone already present, not
   // someone actively joining.
   socket.on('existing-peers', (peers) => {
-    peers.forEach(({ id, username, sharing, verified }) => {
+    peers.forEach(({ id, username, avatar, sharing, verified }) => {
       state.knownPeers.add(id);
       state.peerUsernames.set(id, username);
+      setAvatarUrl(username, avatar);
       state.peerVerified.set(id, Boolean(verified));
       const purposes = new Set(PURPOSES.filter((p) => sharing?.[p]));
       if (purposes.size > 0) state.sharingPeers.set(id, purposes);
@@ -799,9 +801,10 @@ export function initPeerSignaling(theSocket) {
   // streams (screen/webcam) are currently active. Encoding params are the
   // same regardless of viewer count, so callPeer configuring the new
   // sender is all that's needed.
-  socket.on('viewer-joined', ({ id, username, verified }) => {
+  socket.on('viewer-joined', ({ id, username, avatar, verified }) => {
     state.knownPeers.add(id);
     state.peerUsernames.set(id, username);
+    setAvatarUrl(username, avatar);
     state.peerVerified.set(id, Boolean(verified));
     // Only a mesh stream needs an offer per newcomer — through the SFU they
     // subscribe on their own, and while a join is deciding, onTransportDecided
@@ -809,6 +812,11 @@ export function initPeerSignaling(theSocket) {
     if (state.isSharingScreen && outgoingVia.screen === 'mesh') callPeer(id, 'screen');
     if (state.isSharingWebcam && outgoingVia.webcam === 'mesh') callPeer(id, 'webcam');
     showToast(`${username} entrou na sala`);
+    refreshParticipants();
+  });
+
+  socket.on('peer-avatar', ({ username, avatar }) => {
+    setAvatarUrl(username, avatar);
     refreshParticipants();
   });
 

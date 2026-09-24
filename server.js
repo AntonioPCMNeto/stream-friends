@@ -96,7 +96,7 @@ app.use((req, res, next) => {
 // Serve static frontend files
 app.use(express.static('public'));
 
-// roomId -> Map<socket.id, { username, clientId, userId, verified, sharing }>
+// roomId -> Map<socket.id, { username, avatar, clientId, userId, verified, sharing }>
 const rooms = new Map();
 
 const MAX_ROOM_ID_LENGTH = 64;
@@ -139,11 +139,20 @@ async function verifyAccount(accessToken) {
     return {
       userId: data.user.id,
       username: meta.username || data.user.email?.split('@')[0],
+      avatar: safeAvatarUrl(meta.avatar_url),
     };
   } catch (err) {
     console.error('Failed to verify Supabase access token:', err);
     return null;
   }
+}
+
+// user_metadata is editable by the account itself, so its avatar_url is only
+// relayed to other clients when it points into this project's avatars bucket —
+// otherwise anyone could make every viewer's browser fetch an arbitrary URL.
+function safeAvatarUrl(url) {
+  const prefix = `${SUPABASE_URL}/storage/v1/object/public/avatars/`;
+  return typeof url === 'string' && url.length <= 300 && url.startsWith(prefix) ? url : null;
 }
 
 function isValidChatMessage(text) {
@@ -196,7 +205,7 @@ function getVoiceOccupants(roomId) {
   if (!room) return [];
   return Array.from(room.values())
     .filter((info) => info.sharing.voice)
-    .map((info) => ({ username: info.username, verified: info.verified }));
+    .map((info) => ({ username: info.username, avatar: info.avatar, verified: info.verified }));
 }
 
 function broadcastVoiceOccupancy(roomId) {
@@ -229,6 +238,8 @@ io.on('connection', (socket) => {
     socket.join(`chat:${roomId}`);
     socket.data.roomId = roomId;
     socket.data.username = finalUsername;
+    socket.data.userId = userId;
+    socket.data.avatar = account?.avatar ?? null;
     // Fallback for persisting chat from clients that don't send a fresh token
     // with each message (older builds); it expires, per-message tokens don't.
     socket.data.accessToken = account ? accessToken : null;
@@ -258,11 +269,12 @@ io.on('connection', (socket) => {
     // which purposes (screen/webcam) each of them is currently sharing.
     socket.emit(
       'existing-peers',
-      Array.from(room, ([id, info]) => ({ id, username: info.username, sharing: info.sharing, verified: info.verified }))
+      Array.from(room, ([id, info]) => ({ id, username: info.username, avatar: info.avatar, sharing: info.sharing, verified: info.verified }))
     );
 
     room.set(socket.id, {
       username: finalUsername,
+      avatar: account?.avatar ?? null,
       clientId: safeClientId,
       userId,
       verified: Boolean(account),
@@ -270,7 +282,24 @@ io.on('connection', (socket) => {
     });
 
     // Announce the new peer to everyone already in the room
-    socket.to(roomId).emit('viewer-joined', { id: socket.id, username: finalUsername, verified: Boolean(account) });
+    socket.to(roomId).emit('viewer-joined', { id: socket.id, username: finalUsername, avatar: account?.avatar ?? null, verified: Boolean(account) });
+  });
+
+  // A signed-in client changed their profile picture mid-session. The token is
+  // re-verified (never trusting the client's word for who it is or what the
+  // URL is) and must belong to the same account this socket joined as.
+  socket.on('profile-updated', async ({ accessToken }) => {
+    if (rateLimited(socket, 'profile-updated', 5, 10000)) return;
+    const { roomId, userId } = socket.data;
+    if (!roomId || !userId) return;
+    const account = await verifyAccount(accessToken);
+    if (account?.userId !== userId) return;
+    const info = rooms.get(roomId)?.get(socket.id);
+    if (!info) return;
+    info.avatar = account.avatar;
+    socket.data.avatar = account.avatar;
+    io.to(roomId).emit('peer-avatar', { username: info.username, avatar: account.avatar });
+    broadcastVoiceOccupancy(roomId);
   });
 
   // Relay WebRTC offer/answer/ICE-candidate messages between two specific
@@ -394,7 +423,7 @@ io.on('connection', (socket) => {
     const { username } = socket.data;
     if (!isValidRoomId(channelId) || !isValidChatMessage(text) || !username) return;
     if (!socket.rooms.has(`chat:${channelId}`)) return;
-    io.to(`chat:${channelId}`).emit('chat-message', { channelId, from: socket.id, username, text: text.trim(), ts: Date.now() });
+    io.to(`chat:${channelId}`).emit('chat-message', { channelId, from: socket.id, username, avatar: socket.data.avatar, text: text.trim(), ts: Date.now() });
     persistChatMessage(channelId, text.trim(), isValidAccessToken(accessToken) ? accessToken : socket.data.accessToken);
   });
 

@@ -1,4 +1,4 @@
-import { buildAvatar, colorForName } from './identity.js';
+import { buildUserAvatar, colorForName, setAvatarUrl } from './identity.js';
 import { getIdentity } from './auth.js';
 import { listMessages } from './rooms.js';
 
@@ -165,7 +165,7 @@ function appendMessage(username, text, ts) {
     hoverTime.textContent = formatTime(ts);
     gutter.appendChild(hoverTime);
   } else {
-    gutter.appendChild(buildAvatar(username));
+    gutter.appendChild(buildUserAvatar(username));
   }
   row.appendChild(gutter);
 
@@ -227,7 +227,8 @@ export function clearChat() {
 export function initChat(theSocket) {
   socket = theSocket;
 
-  socket.on('chat-message', ({ channelId, username, text, ts }) => {
+  socket.on('chat-message', ({ channelId, username, avatar, text, ts }) => {
+    setAvatarUrl(username, avatar);
     if (channelId !== viewingChannelId) return; // e.g. your own room's chat arriving while you're peeking elsewhere
     if (pendingLive) pendingLive.push({ username, text, ts });
     else appendMessage(username, text, ts);
