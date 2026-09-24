@@ -63,8 +63,14 @@ const serverModal = document.getElementById('serverModal');
 const serverModalCloseBtn = document.getElementById('serverModalCloseBtn');
 const serverModalCreateTabBtn = document.getElementById('serverModalCreateTabBtn');
 const serverModalJoinTabBtn = document.getElementById('serverModalJoinTabBtn');
+const serverModalRoomTabBtn = document.getElementById('serverModalRoomTabBtn');
 const serverModalCreatePanel = document.getElementById('serverModalCreatePanel');
 const serverModalJoinPanel = document.getElementById('serverModalJoinPanel');
+const serverModalRoomPanel = document.getElementById('serverModalRoomPanel');
+const adhocRoomCodeInput = document.getElementById('adhocRoomCodeInput');
+const adhocRoomBtn = document.getElementById('adhocRoomBtn');
+const lobbyTitle = document.getElementById('lobbyTitle');
+const roomJoinFields = document.getElementById('roomJoinFields');
 const createServerNameInput = document.getElementById('createServerNameInput');
 const createServerBtn = document.getElementById('createServerBtn');
 const createServerError = document.getElementById('createServerError');
@@ -445,13 +451,16 @@ function openServerChannels(room) {
 }
 
 function switchServerModalTab(tab) {
-  const isCreate = tab === 'create';
-  serverModalCreateTabBtn.classList.toggle('active', isCreate);
-  serverModalJoinTabBtn.classList.toggle('active', !isCreate);
-  serverModalCreateTabBtn.setAttribute('aria-selected', String(isCreate));
-  serverModalJoinTabBtn.setAttribute('aria-selected', String(!isCreate));
-  serverModalCreatePanel.classList.toggle('hidden', !isCreate);
-  serverModalJoinPanel.classList.toggle('hidden', isCreate);
+  const tabs = {
+    create: [serverModalCreateTabBtn, serverModalCreatePanel],
+    join: [serverModalJoinTabBtn, serverModalJoinPanel],
+    room: [serverModalRoomTabBtn, serverModalRoomPanel],
+  };
+  Object.entries(tabs).forEach(([name, [btn, panel]]) => {
+    btn.classList.toggle('active', name === tab);
+    btn.setAttribute('aria-selected', String(name === tab));
+    panel.classList.toggle('hidden', name !== tab);
+  });
 }
 
 // The rail's + button — Discord's own "create or join" choice, replacing
@@ -462,6 +471,7 @@ function openServerModal() {
   joinServerError.textContent = '';
   createServerNameInput.value = '';
   joinServerCodeInput.value = '';
+  adhocRoomCodeInput.value = '';
   switchServerModalTab('create');
   serverModalBackdrop.classList.remove('hidden');
   createServerNameInput.focus();
@@ -686,6 +696,8 @@ function applyAuthUX() {
   authForm.classList.toggle('hidden', signedIn || !auth.isConfigured());
   authDivider.classList.toggle('hidden', signedIn || !auth.isConfigured());
   guestFields.classList.toggle('hidden', signedIn);
+  roomJoinFields.classList.toggle('hidden', signedIn);
+  lobbyTitle.textContent = signedIn ? 'Sua conta' : 'Entre na sua conta';
 
   if (signedIn) {
     welcomeBack.classList.add('hidden');
@@ -951,6 +963,18 @@ export async function initLobby(theSocket) {
 
   serverModalCreateTabBtn.addEventListener('click', () => switchServerModalTab('create'));
   serverModalJoinTabBtn.addEventListener('click', () => switchServerModalTab('join'));
+  serverModalRoomTabBtn.addEventListener('click', () => {
+    switchServerModalTab('room');
+    adhocRoomCodeInput.focus();
+  });
+  adhocRoomBtn.addEventListener('click', () => {
+    roomCodeInput.value = adhocRoomCodeInput.value.trim();
+    closeServerModal();
+    enterRoom();
+  });
+  adhocRoomCodeInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') adhocRoomBtn.click();
+  });
   serverModalCloseBtn.addEventListener('click', closeServerModal);
   serverModalBackdrop.addEventListener('click', (e) => {
     if (e.target === serverModalBackdrop) closeServerModal();

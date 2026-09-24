@@ -62,14 +62,15 @@
          always-visible "Meus Servidores" list, which just duplicated what
          the rail icons already do. -->
     <div id="serverModalBackdrop" class="modal-backdrop hidden">
-      <div id="serverModal" class="modal" role="dialog" aria-modal="true" aria-label="Adicionar servidor">
+      <div id="serverModal" class="modal" role="dialog" aria-modal="true" aria-label="Servidores e salas">
         <div class="modal-header">
-          <span>Adicionar um servidor</span>
+          <span>Servidores e salas</span>
           <button id="serverModalCloseBtn" class="chat-close-btn" aria-label="Fechar">✕</button>
         </div>
         <div class="modal-tabs" role="tablist">
           <button type="button" id="serverModalCreateTabBtn" class="modal-tab active" role="tab" aria-selected="true">Criar servidor</button>
-          <button type="button" id="serverModalJoinTabBtn" class="modal-tab" role="tab" aria-selected="false">Entrar com código</button>
+          <button type="button" id="serverModalJoinTabBtn" class="modal-tab" role="tab" aria-selected="false">Entrar com convite</button>
+          <button type="button" id="serverModalRoomTabBtn" class="modal-tab" role="tab" aria-selected="false">Sala avulsa</button>
         </div>
 
         <div id="serverModalCreatePanel" class="modal-tab-panel">
@@ -88,6 +89,15 @@
           </label>
           <p id="joinServerError" class="error"></p>
           <button id="joinServerBtn" class="btn btn-primary">Entrar no servidor</button>
+        </div>
+
+        <div id="serverModalRoomPanel" class="modal-tab-panel hidden">
+          <label class="field">
+            <span>Código da sala</span>
+            <input id="adhocRoomCodeInput" type="text" placeholder="Deixe em branco para criar uma sala" maxlength="30">
+          </label>
+          <p class="modal-hint">Salas avulsas não pertencem a nenhum servidor e não guardam o histórico do chat.</p>
+          <button id="adhocRoomBtn" class="btn btn-primary">Entrar na sala</button>
         </div>
       </div>
     </div>
@@ -110,7 +120,7 @@
     </div>
     <main>
     <div id="lobby" class="card">
-      <h2>Entre na sua conta</h2>
+      <h2 id="lobbyTitle">Entre na sua conta</h2>
 
       <div id="authStatus" class="auth-status hidden">
         <span id="authAvatar" class="auth-avatar-wrap avatar-editable" title="Foto de perfil"></span>
@@ -118,7 +128,7 @@
         <button id="signOutBtn" class="btn btn-ghost btn-small">Sair</button>
       </div>
 
-      <p id="authDividerServers" class="auth-divider hidden">ou entre com um código</p>
+      <p id="authDividerServers" class="auth-divider hidden">Escolha um canal na barra lateral para entrar. Para uma sala avulsa, use o + e a aba "Sala avulsa".</p>
 
       <div id="authForm" class="hidden">
         <label class="field">
@@ -148,12 +158,14 @@
           <input id="usernameInput" type="text" placeholder="ex.: João" maxlength="30">
         </label>
       </div>
-      <label class="field">
-        <span>Código da Sala</span>
-        <input id="roomCodeInput" type="text" placeholder="Deixe em branco para criar uma sala" maxlength="30">
-      </label>
-      <p id="lobbyError" class="error"></p>
-      <button id="enterBtn" class="btn btn-primary">Entrar na Sala</button>
+      <div id="roomJoinFields">
+        <label class="field">
+          <span>Código da Sala</span>
+          <input id="roomCodeInput" type="text" placeholder="Deixe em branco para criar uma sala" maxlength="30">
+        </label>
+        <p id="lobbyError" class="error"></p>
+        <button id="enterBtn" class="btn btn-primary">Entrar na Sala</button>
+      </div>
     </div>
 
     <div id="appScreen" style="display: none;">
