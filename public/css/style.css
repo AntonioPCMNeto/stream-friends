@@ -77,13 +77,16 @@ main {
 /* The lobby card is centered in <main>, which sits right of the server rail
    + sidebar (76px + 276px), so it looked off-center against the window and
    the header. Reserve the same footprint on its right so it centers on the
-   viewport, shrinking to whatever still fits the 380px card. */
-#appShell:has(.server-rail:not(.hidden)) main:has(#lobby:not(.hidden)) {
-  padding-right: clamp(0px, calc(100vw - 772px), 352px);
+   viewport, shrinking to whatever still fits the 380px card. The lobby is hidden
+   with the .hidden class on desktop but an inline display:none on the web
+   build, so both have to count as "not showing" or the padding leaks into
+   the room. */
+#appShell:has(.server-rail:not(.hidden)) main:has(#lobby:not(.hidden):not([style*="display: none"])) {
+  padding-right: clamp(0px, calc(100vw - 752px), 372px);
 }
 @media (max-width: 880px) {
-  #appShell:has(.server-rail:not(.hidden)) main:has(#lobby:not(.hidden)) {
-    padding-right: clamp(0px, calc(100vw - 496px), 76px);
+  #appShell:has(.server-rail:not(.hidden)) main:has(#lobby:not(.hidden):not([style*="display: none"])) {
+    padding-right: clamp(0px, calc(100vw - 476px), 96px);
   }
 }
 
