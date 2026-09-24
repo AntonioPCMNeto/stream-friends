@@ -1166,6 +1166,7 @@ body.chat-mode #serverSidebar.hidden ~ main { padding-bottom: 88px; }
 .modal-tab:hover { color: var(--text); }
 .modal-tab.active { color: var(--text); border-bottom-color: var(--accent); }
 .modal-tab-panel.hidden { display: none; }
+.modal-hint { margin: 0 0 14px; font-size: 12px; color: var(--text-dim); }
 .modal-tab-panel .btn { width: 100%; }
 
 .share-panel {
