@@ -59,6 +59,32 @@ export function initSettingsPage() {
 
   navItems.forEach((item) => item.addEventListener('click', () => showSection(item.dataset.section)));
   $('settingsCloseBtn').addEventListener('click', close);
+  $('settingsBackBtn').addEventListener('click', close);
+
+  // Clicking the dimmed area closes it — but only when the press started there
+  // too, so dragging a text selection out of the panel doesn't dismiss it.
+  let pressedOnBackdrop = false;
+  page.addEventListener('mousedown', (e) => { pressedOnBackdrop = e.target === page; });
+  page.addEventListener('click', (e) => {
+    if (e.target === page && pressedOnBackdrop) close();
+  });
+
+  // Keep Tab inside the panel while it's open (the page behind it is not reachable).
+  page.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const focusable = [...page.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+      .filter((el) => !el.disabled && el.getClientRects().length > 0);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !page.classList.contains('hidden') && !recording) close();
   });
