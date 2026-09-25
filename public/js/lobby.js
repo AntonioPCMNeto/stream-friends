@@ -44,7 +44,6 @@ const authDivider = document.getElementById('authDivider');
 const guestFields = document.getElementById('guestFields');
 const serverSidebar = document.getElementById('serverSidebar');
 const serverRail = document.getElementById('serverRail');
-const authDividerServers = document.getElementById('authDividerServers');
 const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
 const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 const noServerView = document.getElementById('noServerView');
@@ -71,6 +70,12 @@ const adhocRoomCodeInput = document.getElementById('adhocRoomCodeInput');
 const adhocRoomBtn = document.getElementById('adhocRoomBtn');
 const lobbyTitle = document.getElementById('lobbyTitle');
 const roomJoinFields = document.getElementById('roomJoinFields');
+const homeView = document.getElementById('homeView');
+const homeLiveSection = document.getElementById('homeLiveSection');
+const homeLiveList = document.getElementById('homeLiveList');
+const homeServersList = document.getElementById('homeServersList');
+const homeAddServerBtn = document.getElementById('homeAddServerBtn');
+const homeAdhocRoomBtn = document.getElementById('homeAdhocRoomBtn');
 const createServerNameInput = document.getElementById('createServerNameInput');
 const createServerBtn = document.getElementById('createServerBtn');
 const createServerError = document.getElementById('createServerError');
@@ -336,7 +341,10 @@ function showNoServerView() {
   channelsView.classList.add('hidden');
   noServerView.classList.remove('hidden');
   updateServerRailActive();
-  sendWatchServer([]);
+  myServers = [];
+  serverChannels.clear();
+  syncWatchedChannels();
+  scheduleHomeRender();
 }
 
 // Below the mobile breakpoint the sidebar is an off-canvas overlay (see
@@ -367,6 +375,9 @@ async function refreshMyServers() {
   if (requestId !== serversRequestId) return;
 
   renderServerRail(myRooms);
+  myServers = myRooms;
+  const known = new Set(myRooms.map((room) => room.id));
+  [...serverChannels.keys()].filter((id) => !known.has(id)).forEach((id) => serverChannels.delete(id));
 
   if (myRooms.length === 0) {
     showNoServerView();
@@ -376,6 +387,18 @@ async function refreshMyServers() {
   const savedId = loadSavedServerId();
   const target = myRooms.find((room) => room.id === savedId) || myRooms[myRooms.length - 1];
   openServerChannels(target);
+  loadOtherServerChannels(myRooms, target, requestId);
+}
+
+// The selected server's channels come from refreshChannels; the rest are only
+// needed for Home and for watching their voice occupancy.
+async function loadOtherServerChannels(myRooms, selected, requestId) {
+  const others = myRooms.filter((room) => room.id !== selected.id);
+  const lists = await Promise.all(others.map((room) => rooms.listChannels(room.id)));
+  if (requestId !== serversRequestId) return;
+  others.forEach((room, i) => serverChannels.set(room.id, lists[i]));
+  syncWatchedChannels();
+  scheduleHomeRender();
 }
 
 // Joins the server from a pending invite link, if there is one, and makes it
@@ -403,6 +426,19 @@ async function acceptPendingInvite() {
 // highlighting alone (no refetch) is handled by updateServerRailActive.
 function renderServerRail(myRooms) {
   serverRail.innerHTML = '';
+
+  const homeBtn = document.createElement('button');
+  homeBtn.type = 'button';
+  homeBtn.className = 'server-rail-icon server-rail-home';
+  homeBtn.title = 'Início';
+  homeBtn.setAttribute('aria-label', 'Início');
+  homeBtn.textContent = '🏠';
+  homeBtn.addEventListener('click', goHome);
+  serverRail.appendChild(homeBtn);
+  const divider = document.createElement('span');
+  divider.className = 'server-rail-divider';
+  serverRail.appendChild(divider);
+
   myRooms.forEach((room) => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -431,9 +467,203 @@ function renderServerRail(myRooms) {
 // refetching the room list, so highlighting is a separate, cheap pass
 // rather than piggybacking on renderServerRail's rebuild.
 function updateServerRailActive() {
-  serverRail.querySelectorAll('.server-rail-icon').forEach((btn) => {
+  serverRail.querySelectorAll('.server-rail-icon[data-room-id]').forEach((btn) => {
     btn.classList.toggle('active', selectedServer?.id === btn.dataset.roomId);
   });
+  serverRail.querySelector('.server-rail-home')?.classList.toggle('active', !state.hasEntered);
+}
+
+// Home — the signed-in lobby card (see index.html's #homeView): who is active
+// in any of your servers' channels right now, plus a shortcut into each
+// server. Driven by the same live occupancy feed as the sidebar, but across
+// every server instead of only the selected one, so the socket watches the
+// union of all their channels (syncWatchedChannels).
+let myServers = [];
+const serverChannels = new Map(); // server id -> its channels
+let pendingSnapshot = false; // a watch-server was sent and its occupancy snapshot hasn't come back yet
+let homeRenderQueued = false;
+
+function scheduleHomeRender() {
+  if (homeRenderQueued) return;
+  homeRenderQueued = true;
+  queueMicrotask(() => {
+    homeRenderQueued = false;
+    renderHome();
+  });
+}
+
+function syncWatchedChannels() {
+  const ids = [...serverChannels.values()].flatMap((channels) => channels.map((c) => c.id)).sort();
+  if (ids.join(',') === [...lastWatchedChannelIds].sort().join(',')) return;
+  sendWatchServer(ids);
+}
+
+function collectActiveChannels() {
+  const active = [];
+  myServers.forEach((server) => {
+    (serverChannels.get(server.id) || []).forEach((channel) => {
+      const occupants = channelOccupancy.get(channel.id) || [];
+      if (occupants.length) active.push({ server, channel, occupants });
+    });
+  });
+  const isLive = (entry) => Number(entry.occupants.some((o) => o.screen));
+  return active.sort((a, b) => isLive(b) - isLive(a) || b.occupants.length - a.occupants.length);
+}
+
+function countActive(server) {
+  return (serverChannels.get(server.id) || []).reduce((n, c) => n + (channelOccupancy.get(c.id)?.length || 0), 0);
+}
+
+function buildLiveBadge() {
+  const badge = document.createElement('span');
+  badge.className = 'live-badge';
+  badge.textContent = 'AO VIVO';
+  return badge;
+}
+
+function homeMessage(text) {
+  const p = document.createElement('p');
+  p.className = 'home-empty';
+  p.textContent = text;
+  return p;
+}
+
+function enterChannelFromHome(server, channel, mode) {
+  if (selectedServer?.id !== server.id) openServerChannels(server);
+  const isVoice = channel.type === 'voice';
+  joinRoom(channel.id, isVoice ? `🔊 ${channel.name}` : `#${channel.name}`);
+  if (mode === 'call') joinVoice();
+  else if (mode === 'chat') openPanelIfClosed();
+}
+
+function buildHomeButton(label, primary, onClick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `btn btn-small ${primary ? 'btn-primary' : 'btn-ghost'}`;
+  btn.textContent = label;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function buildLiveCard({ server, channel, occupants }) {
+  const isVoice = channel.type === 'voice';
+  const live = occupants.some((o) => o.screen);
+
+  const card = document.createElement('div');
+  card.className = 'home-card';
+
+  const main = document.createElement('div');
+  main.className = 'home-card-main';
+
+  const title = document.createElement('div');
+  title.className = 'home-card-title';
+  const titleText = document.createElement('span');
+  titleText.className = 'home-card-title-text';
+  titleText.textContent = `${isVoice ? '🔊' : '#'} ${channel.name}`;
+  title.appendChild(titleText);
+  const serverName = document.createElement('span');
+  serverName.className = 'home-card-server';
+  serverName.textContent = server.name;
+  title.appendChild(serverName);
+  if (live) title.appendChild(buildLiveBadge());
+  main.appendChild(title);
+
+  const people = document.createElement('div');
+  people.className = 'home-people';
+  const avatars = document.createElement('span');
+  avatars.className = 'home-avatars';
+  occupants.slice(0, 4).forEach(({ username, avatar }) => {
+    setAvatarUrl(username, avatar);
+    avatars.appendChild(buildUserAvatar(username));
+  });
+  people.appendChild(avatars);
+  const names = document.createElement('span');
+  names.className = 'home-card-sub';
+  const shown = occupants.slice(0, 3).map((o) => o.username).join(', ');
+  names.textContent = occupants.length > 3 ? `${shown} +${occupants.length - 3}` : shown;
+  people.appendChild(names);
+  main.appendChild(people);
+  card.appendChild(main);
+
+  const actions = document.createElement('div');
+  actions.className = 'home-card-actions';
+  if (isVoice) {
+    actions.appendChild(buildHomeButton('Entrar', true, () => enterChannelFromHome(server, channel, 'call')));
+    if (live) actions.appendChild(buildHomeButton('Assistir', false, () => enterChannelFromHome(server, channel, 'watch')));
+  } else if (live) {
+    actions.appendChild(buildHomeButton('Assistir', true, () => enterChannelFromHome(server, channel, 'watch')));
+  } else {
+    actions.appendChild(buildHomeButton('Entrar', true, () => enterChannelFromHome(server, channel, 'chat')));
+  }
+  card.appendChild(actions);
+  return card;
+}
+
+// Below the sidebar's off-canvas breakpoint the channel list is a drawer, so
+// picking a server from Home has to open it or nothing visibly happens.
+function openSidebarOnMobile() {
+  if (getComputedStyle(sidebarToggleBtn).display === 'none') return;
+  if (!serverSidebar.classList.contains('open')) sidebarToggleBtn.click();
+}
+
+function buildServerCard(server) {
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'home-card home-server-card';
+  card.classList.toggle('selected', selectedServer?.id === server.id);
+
+  const avatar = buildAvatar(server.name);
+  avatar.classList.add('avatar-md');
+  card.appendChild(avatar);
+
+  const main = document.createElement('span');
+  main.className = 'home-card-main';
+  const name = document.createElement('span');
+  name.className = 'home-card-title home-card-title-text';
+  name.textContent = server.name;
+  main.appendChild(name);
+  const sub = document.createElement('span');
+  sub.className = 'home-card-sub';
+  const active = countActive(server);
+  sub.textContent = active > 0 ? `${active} ativo${active > 1 ? 's' : ''} agora` : 'Ninguém agora';
+  main.appendChild(sub);
+  card.appendChild(main);
+
+  card.addEventListener('click', () => {
+    openServerChannels(server);
+    openSidebarOnMobile();
+  });
+  return card;
+}
+
+function renderHome() {
+  homeLiveList.innerHTML = '';
+  homeServersList.innerHTML = '';
+
+  const hasServers = myServers.length > 0;
+  homeLiveSection.classList.toggle('hidden', !hasServers);
+
+  if (!hasServers) {
+    homeServersList.appendChild(homeMessage('Você ainda não está em nenhum servidor. Crie um ou entre com um convite.'));
+    return;
+  }
+
+  const loading = pendingSnapshot || myServers.some((server) => !serverChannels.has(server.id));
+  const active = collectActiveChannels();
+  if (loading) homeLiveList.appendChild(homeMessage('Carregando…'));
+  else if (active.length === 0) homeLiveList.appendChild(homeMessage('Ninguém nos canais agora.'));
+  else active.forEach((entry) => homeLiveList.appendChild(buildLiveCard(entry)));
+
+  myServers.forEach((server) => homeServersList.appendChild(buildServerCard(server)));
+}
+
+// The rail's Home button. Leaving a room drops its call/streams, so if any of
+// that is running, ask first — a stray click shouldn't cut you off mid-stream.
+function goHome() {
+  if (!state.hasEntered) return;
+  const busy = state.isInVoice || state.isSharingScreen || state.isSharingWebcam;
+  if (busy && !confirm('Sair da sala atual e voltar ao início? Você será desconectado do áudio e das transmissões.')) return;
+  leaveRoom();
 }
 
 // Switches the sidebar to one server's channel list — the only view it
@@ -447,6 +677,7 @@ function openServerChannels(room) {
   noServerView.classList.add('hidden');
   channelsView.classList.remove('hidden');
   updateServerRailActive();
+  scheduleHomeRender();
   refreshChannels();
 }
 
@@ -495,12 +726,13 @@ let lastWatchedChannelIds = [];
 
 function sendWatchServer(channelIds) {
   lastWatchedChannelIds = channelIds;
+  pendingSnapshot = true;
   socket?.emit('watch-server', { channelIds });
 }
 
 function renderOccupants(el, occupants) {
   el.innerHTML = '';
-  occupants.forEach(({ username, avatar: avatarUrl }) => {
+  occupants.forEach(({ username, avatar: avatarUrl, screen }) => {
     setAvatarUrl(username, avatarUrl);
     const row = document.createElement('div');
     row.className = 'voice-channel-occupant';
@@ -510,6 +742,12 @@ function renderOccupants(el, occupants) {
     const name = document.createElement('span');
     name.textContent = username;
     row.appendChild(name);
+    if (screen) {
+      const badge = document.createElement('span');
+      badge.className = 'live-badge live-badge-sm';
+      badge.textContent = 'AO VIVO';
+      row.appendChild(badge);
+    }
     el.appendChild(row);
   });
 }
@@ -518,6 +756,7 @@ function updateChannelOccupancy(channelId, occupants) {
   channelOccupancy.set(channelId, occupants);
   const el = voiceChannelsList.querySelector(`.voice-channel-occupants[data-channel-id="${channelId}"]`);
   if (el) renderOccupants(el, occupants);
+  scheduleHomeRender();
 }
 
 function buildChannelHint(text) {
@@ -664,7 +903,9 @@ async function refreshChannels() {
     voiceChannels.forEach((channel) => voiceChannelsList.appendChild(buildVoiceChannelRow(channel)));
   }
 
-  sendWatchServer(channels.map((c) => c.id));
+  serverChannels.set(server.id, channels);
+  syncWatchedChannels();
+  scheduleHomeRender();
 }
 
 // Signed in ⇒ identity is verified server-side and can't be spoofed, so the
@@ -690,14 +931,15 @@ function applyAuthUX() {
   userBarProfileRow.classList.toggle('hidden', !signedIn);
   serverSidebar.classList.toggle('hidden', !signedIn);
   serverRail.classList.toggle('hidden', !signedIn);
-  authDividerServers.classList.toggle('hidden', !signedIn);
   sidebarToggleBtn.classList.toggle('hidden', !signedIn);
   document.body.classList.toggle('has-sidebar', signedIn);
   authForm.classList.toggle('hidden', signedIn || !auth.isConfigured());
   authDivider.classList.toggle('hidden', signedIn || !auth.isConfigured());
   guestFields.classList.toggle('hidden', signedIn);
   roomJoinFields.classList.toggle('hidden', signedIn);
-  lobbyTitle.textContent = signedIn ? 'Sua conta' : 'Entre na sua conta';
+  lobbyTitle.textContent = signedIn ? 'Início' : 'Entre na sua conta';
+  lobby.classList.toggle('lobby-home', signedIn);
+  homeView.classList.toggle('hidden', !signedIn);
 
   if (signedIn) {
     welcomeBack.classList.add('hidden');
@@ -786,6 +1028,7 @@ function joinRoom(roomId, displayLabel = roomId) {
   setViewingChannel(roomId, displayLabel);
   refreshParticipants();
   updateChannelActiveHighlight();
+  updateServerRailActive();
 
   lobby.classList.add('hidden');
   appScreen.classList.remove('hidden');
@@ -845,6 +1088,7 @@ function leaveRoom() {
   lobby.classList.remove('hidden');
   lobbyError.textContent = '';
   roomCodeInput.value = '';
+  updateServerRailActive();
   applyAuthUX(); // not applyReturningUserUX() directly — that ignores identity and would show the guest "welcome back" banner even when still signed in
 
   socket.disconnect();
@@ -963,6 +1207,12 @@ export async function initLobby(theSocket) {
 
   serverModalCreateTabBtn.addEventListener('click', () => switchServerModalTab('create'));
   serverModalJoinTabBtn.addEventListener('click', () => switchServerModalTab('join'));
+  homeAddServerBtn.addEventListener('click', openServerModal);
+  homeAdhocRoomBtn.addEventListener('click', () => {
+    openServerModal();
+    switchServerModalTab('room');
+    adhocRoomCodeInput.focus();
+  });
   serverModalRoomTabBtn.addEventListener('click', () => {
     switchServerModalTab('room');
     adhocRoomCodeInput.focus();
@@ -1082,6 +1332,8 @@ export async function initLobby(theSocket) {
 
   socket.on('voice-occupancy-snapshot', (list) => {
     list.forEach(({ channelId, occupants }) => updateChannelOccupancy(channelId, occupants));
+    pendingSnapshot = false;
+    scheduleHomeRender();
   });
   socket.on('voice-occupancy', ({ channelId, occupants }) => updateChannelOccupancy(channelId, occupants));
 
@@ -1095,9 +1347,15 @@ export async function initLobby(theSocket) {
   // Fires again on every future sign-in/sign-up/sign-out — keeps the UI and
   // auto-join in sync without needing to re-check manually after each one.
   auth.onIdentityChange((newIdentity) => {
-    const avatarChanged = Boolean(identity && newIdentity) && identity.avatarUrl !== newIdentity.avatarUrl;
+    const profileChanged = Boolean(identity && newIdentity)
+      && (identity.avatarUrl !== newIdentity.avatarUrl || identity.username !== newIdentity.username);
+    const previousName = identity?.username;
     identity = newIdentity;
-    if (avatarChanged) {
+    if (profileChanged) {
+      if (previousName && previousName !== newIdentity.username) {
+        setAvatarUrl(previousName, null);
+        if (state.hasEntered) state.myUsername = newIdentity.username;
+      }
       setAvatarUrl(newIdentity.username, newIdentity.avatarUrl);
       socket.emit('profile-updated', { accessToken: newIdentity.accessToken });
       refreshParticipants();

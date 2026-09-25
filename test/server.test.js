@@ -284,6 +284,49 @@ test('livekit-token is refused for a socket that is not in a room', async () => 
   lurker.close();
 });
 
+test('watch-server snapshots and live updates list voice and screen occupants with a live flag', async () => {
+  const watcher = await connect();
+  const alice = await connect();
+  const bob = await connect();
+
+  const snapshot = new Promise((resolve) => watcher.once('voice-occupancy-snapshot', resolve));
+  watcher.emit('watch-server', { channelIds: ['chan-live', 'chan-empty'] });
+  assert.deepStrictEqual(await snapshot, [
+    { channelId: 'chan-live', occupants: [] },
+    { channelId: 'chan-empty', occupants: [] },
+  ]);
+
+  alice.emit('join-room', { roomId: 'chan-live', username: 'Alice' });
+  bob.emit('join-room', { roomId: 'chan-live', username: 'Bob' });
+  await wait(100);
+
+  const updates = [];
+  watcher.on('voice-occupancy', (msg) => updates.push(msg));
+
+  alice.emit('share-status', { purpose: 'voice', isSharing: true });
+  await wait(100);
+  bob.emit('share-status', { purpose: 'screen', isSharing: true });
+  await wait(100);
+
+  assert.strictEqual(updates.length, 2);
+  const [afterVoice, afterScreen] = updates;
+  assert.strictEqual(afterVoice.channelId, 'chan-live');
+  assert.deepStrictEqual(afterVoice.occupants.map((o) => [o.username, o.screen]), [['Alice', false]]);
+  assert.deepStrictEqual(afterScreen.occupants.map((o) => [o.username, o.screen]), [['Alice', false], ['Bob', true]]);
+
+  bob.emit('share-status', { purpose: 'webcam', isSharing: true });
+  await wait(100);
+  assert.strictEqual(updates.length, 2, 'a webcam change must not touch the occupancy list');
+
+  bob.close();
+  await wait(150);
+  assert.strictEqual(updates.length, 3, 'a sharer disconnecting must clear them from the list');
+  assert.deepStrictEqual(updates[2].occupants.map((o) => o.username), ['Alice']);
+
+  watcher.close();
+  alice.close();
+});
+
 test.after(() => {
   io.close();
   server.close();

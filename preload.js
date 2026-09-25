@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('screenPicker', {
   // Available screen/window sources, fetched on demand by share.js before it
@@ -16,6 +16,27 @@ contextBridge.exposeInMainWorld('tray', {
   reportVoiceState: (voiceState) => ipcRenderer.send('voice:state', voiceState),
   onVoiceCommand: (callback) => {
     ipcRenderer.on('voice:command', (_event, command) => callback(command));
+  },
+});
+
+// Global mute/deafen shortcuts — see registerDesktopIpc() in main.js. Absent on
+// the web build, where hotkeys.js falls back to in-page key listeners.
+contextBridge.exposeInMainWorld('hotkeys', {
+  // { mute, deafen } accelerators (or null); resolves to { mute, deafen } booleans
+  // saying which ones the OS actually granted.
+  set: (bindings) => ipcRenderer.invoke('hotkeys:set', bindings),
+  onTrigger: (callback) => {
+    ipcRenderer.on('hotkeys:trigger', (_event, action) => callback(action));
+  },
+});
+
+// Desktop-only preferences and window helpers for the settings page.
+contextBridge.exposeInMainWorld('desktop', {
+  showWindow: () => ipcRenderer.invoke('desktop:show-window'),
+  getPrefs: () => ipcRenderer.invoke('desktop:get-prefs'),
+  setPrefs: (patch) => ipcRenderer.invoke('desktop:set-prefs', patch),
+  setZoom: (percent) => {
+    if (Number.isFinite(percent)) webFrame.setZoomFactor(Math.min(2, Math.max(0.5, percent / 100)));
   },
 });
 

@@ -1,4 +1,4 @@
-import { getIdentity, uploadAvatar } from './auth.js';
+import { getIdentity, uploadAvatar, removeAvatar } from './auth.js';
 import { buildAvatar } from './identity.js';
 import { showToast } from './toast.js';
 
@@ -21,6 +21,13 @@ async function toAvatarBlob(file) {
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.85));
 }
 
+let openModalImpl = null;
+
+// For the settings page's "Editar foto de perfil".
+export function openProfileModal() {
+  openModalImpl?.();
+}
+
 export function initProfilePicture() {
   const input = document.getElementById('avatarFileInput');
   const backdrop = document.getElementById('profileModalBackdrop');
@@ -29,6 +36,7 @@ export function initProfilePicture() {
   const chooseBtn = document.getElementById('profileChooseBtn');
   const saveBtn = document.getElementById('profileSaveBtn');
   const cancelBtn = document.getElementById('profileCancelBtn');
+  const removeBtn = document.getElementById('profileRemoveBtn');
   const settingsBtn = document.getElementById('userBarSettingsBtn');
   const settingsPopover = document.getElementById('userBarPopover');
 
@@ -44,6 +52,7 @@ export function initProfilePicture() {
     avatar.classList.add('avatar-xl');
     preview.appendChild(avatar);
     chooseBtn.classList.remove('hidden');
+    removeBtn.classList.toggle('hidden', !identity.avatarUrl);
     saveBtn.classList.add('hidden');
     cancelBtn.classList.add('hidden');
   }
@@ -56,6 +65,7 @@ export function initProfilePicture() {
     avatar.classList.add('avatar-xl');
     preview.appendChild(avatar);
     chooseBtn.classList.add('hidden');
+    removeBtn.classList.add('hidden');
     saveBtn.classList.remove('hidden');
     cancelBtn.classList.remove('hidden');
   }
@@ -77,6 +87,7 @@ export function initProfilePicture() {
     backdrop.classList.remove('hidden');
   }
 
+  openModalImpl = openModal;
   document.querySelectorAll('.avatar-editable').forEach((el) => el.addEventListener('click', openModal));
   document.getElementById('userBarProfileBtn').addEventListener('click', () => {
     if (!settingsPopover.classList.contains('hidden')) settingsBtn.click();
@@ -90,6 +101,18 @@ export function initProfilePicture() {
   });
 
   chooseBtn.addEventListener('click', () => input.click());
+  removeBtn.addEventListener('click', async () => {
+    removeBtn.disabled = true;
+    const { error } = await removeAvatar();
+    removeBtn.disabled = false;
+    if (error) {
+      showToast(error, 'error');
+      return;
+    }
+    showToast('Foto de perfil removida.');
+    closeModal();
+    document.dispatchEvent(new CustomEvent('profile-changed'));
+  });
   cancelBtn.addEventListener('click', showCurrent);
 
   input.addEventListener('change', async () => {
@@ -125,5 +148,6 @@ export function initProfilePicture() {
     }
     showToast('Foto de perfil atualizada!');
     closeModal();
+    document.dispatchEvent(new CustomEvent('profile-changed'));
   });
 }

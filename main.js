@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, session, desktopCapturer, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, Tray, session, desktopCapturer, ipcMain, globalShortcut } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const os = require('os');
@@ -23,6 +23,10 @@ let quitting = false;
 let updateReady = false;
 let voiceState = { inVoice: false, isMuted: false, isDeafened: false };
 
+// Started by the OS at login with --hidden (see the "Iniciar minimizado" setting):
+// stay in the tray instead of opening a window over whatever the user is doing.
+const launchedHidden = process.argv.includes('--hidden');
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -30,6 +34,7 @@ function createWindow() {
     minWidth: 760,
     minHeight: 560,
     backgroundColor: '#0b0b10',
+    show: !launchedHidden,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -55,6 +60,11 @@ function createWindow() {
 
   mainWindow.on('close', (event) => {
     if (quitting) return;
+    if (!prefs.closeToTray) {
+      // "Fechar minimiza para a bandeja" is off: X really closes the app.
+      quitting = true;
+      return;
+    }
     event.preventDefault();
     mainWindow.hide();
     showTrayHintOnce();
@@ -143,6 +153,88 @@ function showTrayHintOnce() {
   });
 }
 
+// Preferences the main process needs before any page has loaded (the close
+// behavior and how to start), kept in userData rather than the page's storage.
+const PREFS_FILE = () => path.join(app.getPath('userData'), 'desktop-prefs.json');
+let prefs = { closeToTray: true, startMinimized: false };
+
+function loadPrefs() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(PREFS_FILE(), 'utf8'));
+    prefs = { closeToTray: raw.closeToTray !== false, startMinimized: raw.startMinimized === true };
+  } catch { /* first run, or unreadable: the defaults stand */ }
+}
+
+function savePrefs() {
+  try { fs.writeFileSync(PREFS_FILE(), JSON.stringify(prefs)); } catch { /* the choice just isn't remembered */ }
+}
+
+const loginItemArgs = () => (prefs.startMinimized ? ['--hidden'] : []);
+// Registering the dev electron.exe as a login item would be wrong, so this is
+// only ever touched by the installed app.
+const readOpenAtLogin = () => (app.isPackaged ? app.getLoginItemSettings({ args: loginItemArgs() }).openAtLogin : false);
+
+// Global mute/deafen. The renderer asks for accelerators; nothing that could
+// swallow ordinary typing system-wide is accepted (needs Ctrl/Alt/Super or an
+// F-key), even from a compromised page.
+const HOTKEY_KEY = /^([A-Z0-9]|F([1-9]|1[0-9]|2[0-4])|Space|Up|Down|Left|Right|Home|End|PageUp|PageDown|Insert|Delete|Tab|Enter|Backspace|[`\-=\[\]\\;',./])$/;
+const HOTKEY_MODIFIERS = ['Control', 'Alt', 'Shift', 'Super'];
+let registeredHotkeys = [];
+
+function isSafeHotkey(accel) {
+  if (typeof accel !== 'string' || accel.length > 40) return false;
+  const parts = accel.split('+');
+  const key = parts.pop();
+  if (!HOTKEY_KEY.test(key)) return false;
+  if (new Set(parts).size !== parts.length || !parts.every((m) => HOTKEY_MODIFIERS.includes(m))) return false;
+  return parts.some((m) => m === 'Control' || m === 'Alt' || m === 'Super') || /^F\d/.test(key);
+}
+
+function registerDesktopIpc() {
+  ipcMain.handle('hotkeys:set', (_event, bindings) => {
+    registeredHotkeys.forEach((accel) => globalShortcut.unregister(accel));
+    registeredHotkeys = [];
+    const result = { mute: false, deafen: false };
+    ['mute', 'deafen'].forEach((action) => {
+      const accel = bindings?.[action];
+      if (!isSafeHotkey(accel) || registeredHotkeys.includes(accel)) return;
+      let granted = false;
+      try {
+        granted = globalShortcut.register(accel, () => mainWindow?.webContents.send('hotkeys:trigger', action));
+      } catch { /* an accelerator Electron can't parse counts as refused */ }
+      if (granted) {
+        registeredHotkeys.push(accel);
+        result[action] = true;
+      }
+    });
+    return result;
+  });
+
+  ipcMain.handle('desktop:show-window', () => showWindow());
+
+  ipcMain.handle('desktop:get-prefs', () => ({
+    closeToTray: prefs.closeToTray,
+    startMinimized: prefs.startMinimized,
+    openAtLogin: readOpenAtLogin(),
+    packaged: app.isPackaged,
+  }));
+
+  ipcMain.handle('desktop:set-prefs', (_event, patch) => {
+    const wasOpenAtLogin = readOpenAtLogin(); // read with the old args, before they change
+    if (typeof patch?.closeToTray === 'boolean') prefs.closeToTray = patch.closeToTray;
+    if (typeof patch?.startMinimized === 'boolean') prefs.startMinimized = patch.startMinimized;
+    savePrefs();
+    if (app.isPackaged && (typeof patch?.openAtLogin === 'boolean' || typeof patch?.startMinimized === 'boolean')) {
+      app.setLoginItemSettings({
+        openAtLogin: typeof patch.openAtLogin === 'boolean' ? patch.openAtLogin : wasOpenAtLogin,
+        args: loginItemArgs(),
+      });
+    }
+  });
+
+  app.on('will-quit', () => globalShortcut.unregisterAll());
+}
+
 function sendVoiceCommand(command) {
   mainWindow?.webContents.send('voice:command', command);
 }
@@ -226,6 +318,8 @@ app.on('second-instance', showWindow);
 
 app.whenReady().then(() => {
   if (!gotLock) return;
+  loadPrefs();
+  registerDesktopIpc();
   createWindow();
   createTray();
   registerScreenPicker();

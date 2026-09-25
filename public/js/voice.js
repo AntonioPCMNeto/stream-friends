@@ -1,7 +1,10 @@
 import { iceServers } from './iceServers.js';
 import { state } from './state.js';
 import { showToast } from './toast.js';
-import { playJoinSound, playLeaveSound } from './sounds.js';
+import {
+  playJoinSound, playLeaveSound, playMuteSound, playUnmuteSound, playDeafenSound, playUndeafenSound,
+} from './sounds.js';
+import { getSetting, onSettingChange } from './settings.js';
 import { refreshParticipants, setSpeaking } from './participants.js';
 
 // Voice chat is a full mesh, unlike screen/webcam (one sender -> many
@@ -61,54 +64,74 @@ function loadRnnoiseModule() {
 
 // The processing graph for the CURRENT raw mic capture — rebuilt on every
 // join/leave/device switch, since it's wired to one specific raw stream.
-let noiseSuppressionGraph = null; // { rawStream, sourceNode, workletNode, destNode }
+let noiseSuppressionGraph = null; // { rawStream, sourceNode, workletNode, gainNode, destNode }
 
-// Inserts RNNoise between the raw captured mic and everything else (the
-// speaking-ring/analyser, and whatever's sent to peers) — the processed
-// stream becomes the new state.micStream, so the rest of this module never
-// needs to know suppression is happening. Falls back to the raw stream
-// untouched (still has the browser's own noiseSuppression from captureMic)
-// if AudioWorklet or the WASM module is unavailable, rather than failing
-// voice chat entirely over a denoiser that couldn't load.
-async function applyNoiseSuppression(rawStream) {
+// Builds the processing chain for one raw capture: mic -> [RNNoise] -> input
+// gain -> a new stream. That stream is what the rest of this module treats as
+// the mic (the speaking-ring/analyser, and whatever's sent to peers), so
+// nothing else needs to know any of this is happening. RNNoise is left out
+// when the setting is off or AudioWorklet/the WASM module can't load (the gain
+// still applies) rather than failing voice chat over a denoiser. Resolves to
+// null only if Web Audio itself is unavailable, and the caller keeps the raw
+// stream.
+async function createMicChain(rawStream) {
+  let ctx;
   try {
-    const ctx = ensureAudioCtx();
-    const { RnnoiseWorkletNode, loadRnnoise } = await loadRnnoiseModule();
-
-    if (!rnnoiseWorkletModuleLoaded) {
-      await ctx.audioWorklet.addModule(`${RNNOISE_BASE}/rnnoiseWorklet.js`);
-      rnnoiseWorkletModuleLoaded = true;
-    }
-    if (!rnnoiseWasmBinaryPromise) {
-      rnnoiseWasmBinaryPromise = loadRnnoise({
-        url: `${RNNOISE_BASE}/rnnoise.wasm`,
-        simdUrl: `${RNNOISE_BASE}/rnnoise_simd.wasm`,
-      });
-    }
-    const wasmBinary = await rnnoiseWasmBinaryPromise;
-
-    const sourceNode = ctx.createMediaStreamSource(rawStream);
-    const workletNode = new RnnoiseWorkletNode(ctx, { maxChannels: 1, wasmBinary });
-    const destNode = ctx.createMediaStreamDestination();
-    sourceNode.connect(workletNode).connect(destNode);
-
-    noiseSuppressionGraph = { rawStream, sourceNode, workletNode, destNode };
-    return destNode.stream;
+    ctx = ensureAudioCtx();
   } catch (err) {
-    console.error('RNNoise unavailable, falling back to unprocessed mic:', err);
-    // No graph actually got installed for this stream — make sure a stale
-    // reference from a previous (successful) capture doesn't linger and get
-    // torn down as if it still belonged to what's now state.micStream.
-    noiseSuppressionGraph = null;
-    return rawStream;
+    console.error('Web Audio unavailable, using the unprocessed mic:', err);
+    return null;
   }
+
+  let workletNode = null;
+  if (getSetting('noiseSuppression')) {
+    try {
+      const { RnnoiseWorkletNode, loadRnnoise } = await loadRnnoiseModule();
+
+      if (!rnnoiseWorkletModuleLoaded) {
+        await ctx.audioWorklet.addModule(`${RNNOISE_BASE}/rnnoiseWorklet.js`);
+        rnnoiseWorkletModuleLoaded = true;
+      }
+      if (!rnnoiseWasmBinaryPromise) {
+        rnnoiseWasmBinaryPromise = loadRnnoise({
+          url: `${RNNOISE_BASE}/rnnoise.wasm`,
+          simdUrl: `${RNNOISE_BASE}/rnnoise_simd.wasm`,
+        });
+      }
+      const wasmBinary = await rnnoiseWasmBinaryPromise;
+      workletNode = new RnnoiseWorkletNode(ctx, { maxChannels: 1, wasmBinary });
+    } catch (err) {
+      console.error('RNNoise unavailable, continuing without it:', err);
+    }
+  }
+
+  const sourceNode = ctx.createMediaStreamSource(rawStream);
+  const gainNode = ctx.createGain();
+  gainNode.gain.value = getSetting('inputVolume') / 100;
+  const destNode = ctx.createMediaStreamDestination();
+  if (workletNode) sourceNode.connect(workletNode).connect(gainNode);
+  else sourceNode.connect(gainNode);
+  gainNode.connect(destNode);
+
+  return { graph: { rawStream, sourceNode, workletNode, gainNode, destNode }, stream: destNode.stream };
+}
+
+async function applyNoiseSuppression(rawStream) {
+  const chain = await createMicChain(rawStream);
+  // Also clears a stale graph from a previous capture, so it can't linger and
+  // get torn down as if it still belonged to what's now state.micStream.
+  noiseSuppressionGraph = chain ? chain.graph : null;
+  return chain ? chain.stream : rawStream;
 }
 
 function teardownGraph(graph) {
   if (!graph) return;
   graph.sourceNode.disconnect();
-  graph.workletNode.disconnect();
-  graph.workletNode.destroy();
+  graph.gainNode.disconnect();
+  if (graph.workletNode) {
+    graph.workletNode.disconnect();
+    graph.workletNode.destroy();
+  }
   graph.rawStream.getTracks().forEach((t) => t.stop());
 }
 
@@ -210,6 +233,10 @@ const connectedBar = document.getElementById('voiceConnectedBar');
 const micSelect = document.getElementById('voiceMicSelect');
 const speakerRow = document.getElementById('userBarSpeakerRow');
 const speakerSelect = document.getElementById('voiceSpeakerSelect');
+// The gear popover and the settings page each have a device picker; they always show the same choice.
+const micSelects = [micSelect, document.getElementById('settingsMicSelect')];
+const speakerRows = [speakerRow, document.getElementById('settingsSpeakerRow')];
+const speakerSelects = [speakerSelect, document.getElementById('settingsSpeakerSelect')];
 const muteBtn = document.getElementById('voiceMuteBtn');
 const deafenBtn = document.getElementById('voiceDeafenBtn');
 const leaveBtn = document.getElementById('voiceLeaveBtn');
@@ -273,6 +300,7 @@ function setVoiceUI() {
   else if (state.isDeafened) statusEl.textContent = '🔕 Ensurdecido';
   else if (!state.micStream) statusEl.textContent = '🎧 Só ouvindo';
   else if (state.isMuted) statusEl.textContent = '🔇 Silenciado';
+  else if (getSetting('pttEnabled')) statusEl.textContent = pttHeld ? '🎙️ Falando' : '🎧 Apertar para falar';
   else statusEl.textContent = '🎧 Em áudio';
 
   window.tray?.reportVoiceState({ inVoice, isMuted: state.isMuted, isDeafened: state.isDeafened });
@@ -296,19 +324,36 @@ function toggleSettingsPopover() {
   settingsBtn.setAttribute('aria-expanded', String(opening));
 }
 
+// Push-to-talk (see hotkeys.js): while it's on the mic only carries audio
+// while the key is held, on top of mute/deafen which still win.
+let pttHeld = false;
+
+function micShouldBeEnabled() {
+  const talking = !getSetting('pttEnabled') || pttHeld;
+  return state.isInVoice && !state.isMuted && !state.isDeafened && talking;
+}
+
 // track.enabled=false keeps the sender/PC up and just sends silence — no
 // renegotiation, instant, cheap.
 function applyMicEnabled() {
-  const enabled = state.isInVoice && !state.isMuted && !state.isDeafened;
+  const enabled = micShouldBeEnabled();
   state.micStream?.getAudioTracks().forEach((t) => { t.enabled = enabled; });
+}
+
+export function setPttHeld(held) {
+  if (pttHeld === held) return;
+  pttHeld = held;
+  applyMicEnabled();
+  setVoiceUI();
 }
 
 // Join/leave cues only play while you're in voice and not deafened, like
 // Discord, and follow the speaker picked in settings. The sink is only
 // re-applied when it changes: switching it re-inits the context's output.
 let cueSinkId = '';
-function playCue(play) {
-  if (!state.isInVoice || state.isDeafened) return;
+function playCue(play, kind = 'joinLeave', { whileDeafened = false } = {}) {
+  if (!state.isInVoice || (state.isDeafened && !whileDeafened)) return;
+  if (!getSetting(kind === 'mute' ? 'soundsMute' : 'soundsJoinLeave')) return;
   try {
     const ctx = ensureAudioCtx();
     const sinkId = currentSpeakerDeviceId === 'default' ? '' : currentSpeakerDeviceId;
@@ -316,7 +361,7 @@ function playCue(play) {
       cueSinkId = sinkId;
       ctx.setSinkId(sinkId).catch(() => {});
     }
-    play(ctx);
+    play(ctx, getSetting('soundsVolume') / 100);
   } catch { /* a missed cue must never break signalling */ }
 }
 
@@ -354,7 +399,7 @@ export function getUserVoiceSettings(peerId) {
 
 function applyUserVoice(peerId, audio) {
   const { volume, muted } = getUserVoiceSettings(peerId);
-  audio.volume = muted ? 0 : volume;
+  audio.volume = muted ? 0 : volume * (getSetting('outputVolume') / 100);
 }
 
 export function setUserVoiceSettings(peerId, patch) {
@@ -456,7 +501,11 @@ function teardownAllPeers() {
 }
 
 function captureMic(deviceId) {
-  const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  const audio = {
+    echoCancellation: getSetting('echoCancellation'),
+    noiseSuppression: getSetting('noiseSuppression'),
+    autoGainControl: getSetting('autoGainControl'),
+  };
   if (deviceId && deviceId !== 'default') audio.deviceId = { exact: deviceId };
   return navigator.mediaDevices.getUserMedia({ audio });
 }
@@ -471,43 +520,53 @@ async function populateMicSelect() {
     devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
   } catch { /* leave the list at just "Microfone padrão" */ }
 
-  micSelect.innerHTML = '';
-  micSelect.appendChild(new Option('Microfone padrão', 'default'));
-  devices.forEach((d) => {
-    if (!d.deviceId || d.deviceId === 'default') return; // browsers that list their own synthetic "default" entry
-    micSelect.appendChild(new Option(d.label || `Entrada ${d.deviceId.slice(0, 6)}`, d.deviceId));
-  });
+  micSelects.forEach((select) => {
+    select.innerHTML = '';
+    select.appendChild(new Option('Microfone padrão', 'default'));
+    devices.forEach((d) => {
+      if (!d.deviceId || d.deviceId === 'default') return; // browsers that list their own synthetic "default" entry
+      select.appendChild(new Option(d.label || `Entrada ${d.deviceId.slice(0, 6)}`, d.deviceId));
+    });
 
-  const validValues = Array.from(micSelect.options).map((o) => o.value);
-  micSelect.value = validValues.includes(currentMicDeviceId) ? currentMicDeviceId : 'default';
+    const validValues = Array.from(select.options).map((o) => o.value);
+    select.value = validValues.includes(currentMicDeviceId) ? currentMicDeviceId : 'default';
+  });
 }
 
 // Same idea as populateMicSelect, for 'audiooutput' devices — a no-op (empty
 // select, left hidden) when the browser can't select an output at all.
 async function populateSpeakerSelect() {
   if (!SPEAKER_SELECTION_SUPPORTED) return;
-  speakerRow.classList.remove('hidden');
+  speakerRows.forEach((row) => row.classList.remove('hidden'));
 
   let devices = [];
   try {
     devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput');
   } catch { /* leave the list at just "Saída padrão" */ }
 
-  speakerSelect.innerHTML = '';
-  speakerSelect.appendChild(new Option('Saída padrão', 'default'));
-  devices.forEach((d) => {
-    if (!d.deviceId || d.deviceId === 'default') return;
-    speakerSelect.appendChild(new Option(d.label || `Saída ${d.deviceId.slice(0, 6)}`, d.deviceId));
-  });
+  speakerSelects.forEach((select) => {
+    select.innerHTML = '';
+    select.appendChild(new Option('Saída padrão', 'default'));
+    devices.forEach((d) => {
+      if (!d.deviceId || d.deviceId === 'default') return;
+      select.appendChild(new Option(d.label || `Saída ${d.deviceId.slice(0, 6)}`, d.deviceId));
+    });
 
-  const validValues = Array.from(speakerSelect.options).map((o) => o.value);
-  speakerSelect.value = validValues.includes(currentSpeakerDeviceId) ? currentSpeakerDeviceId : 'default';
+    const validValues = Array.from(select.options).map((o) => o.value);
+    select.value = validValues.includes(currentSpeakerDeviceId) ? currentSpeakerDeviceId : 'default';
+  });
 }
 
 // Hot-swaps the outgoing mic track on every live voice connection —
 // replaceTrack, no renegotiation, same pattern as switchCamera() in share.js.
+let recapturePending = false;
+
 async function switchMicDevice(deviceId) {
-  if (!state.isInVoice || micSwitchInFlight) return;
+  if (!state.isInVoice) return;
+  if (micSwitchInFlight) {
+    recapturePending = true; // re-run with whatever is current once this one lands
+    return;
+  }
   micSwitchInFlight = true;
   const previousStream = state.micStream;
   const previousGraph = noiseSuppressionGraph; // captureProcessedMic overwrites the module-level one below on success
@@ -515,7 +574,7 @@ async function switchMicDevice(deviceId) {
   try {
     const stream = await captureProcessedMic(deviceId);
     const track = stream.getAudioTracks()[0];
-    track.enabled = !state.isMuted && !state.isDeafened;
+    track.enabled = micShouldBeEnabled();
 
     state.micStream = stream;
     currentMicDeviceId = deviceId;
@@ -530,17 +589,22 @@ async function switchMicDevice(deviceId) {
   } catch (err) {
     console.error('Failed to switch microphone:', err);
     showToast('Não foi possível trocar o microfone.', 'error');
-    micSelect.value = currentMicDeviceId; // revert the dropdown to what's actually active
+    micSelects.forEach((select) => { select.value = currentMicDeviceId; }); // revert the dropdowns to what's actually active
   } finally {
     micSwitchInFlight = false;
+    if (recapturePending) {
+      recapturePending = false;
+      switchMicDevice(currentMicDeviceId);
+    }
   }
 }
 
 // Bound to the select itself — persists the choice as the new default
 // (Discord-style) whether or not a call is live, and additionally hot-swaps
 // the active track when it is.
-function handleMicSelectChange() {
-  const deviceId = micSelect.value;
+function handleMicSelectChange(event) {
+  const deviceId = event.target.value;
+  micSelects.forEach((select) => { select.value = deviceId; });
   saveDevicePref(MIC_PREF_KEY, deviceId);
   currentMicDeviceId = deviceId;
   if (!state.isInVoice) return;
@@ -548,8 +612,9 @@ function handleMicSelectChange() {
   else showToast('Saia e entre no áudio de novo para usar o microfone.');
 }
 
-function handleSpeakerSelectChange() {
-  currentSpeakerDeviceId = speakerSelect.value;
+function handleSpeakerSelectChange(event) {
+  currentSpeakerDeviceId = event.target.value;
+  speakerSelects.forEach((select) => { select.value = currentSpeakerDeviceId; });
   saveDevicePref(SPEAKER_PREF_KEY, currentSpeakerDeviceId);
   audioSinks.forEach((audio) => applySpeakerSink(audio));
 }
@@ -558,6 +623,7 @@ function handleSpeakerSelectChange() {
 // row is clicked, the same way clicking joinBtn does below.
 export async function joinVoice() {
   if (state.isInVoice) return;
+  stopMicTest(); // free the device the meter may be holding
   let stream = null;
   try {
     stream = await captureMic(currentMicDeviceId);
@@ -617,6 +683,7 @@ function leaveVoice({ silent = false } = {}) {
   state.isInVoice = false;
   state.isMuted = false;
   state.isDeafened = false;
+  pttHeld = false;
   teardownAllPeers();
   setVoiceUI();
   refreshParticipants();
@@ -626,17 +693,21 @@ function leaveVoice({ silent = false } = {}) {
   }
 }
 
-function toggleMute() {
-  if (!state.isInVoice || !state.micStream) return;
+// Both return whether they did anything, so a hotkey only swallows the key press
+// when it actually acted (otherwise Ctrl+Shift+Z still means "redo" in the chat box).
+export function toggleMute() {
+  if (!state.isInVoice || !state.micStream) return false;
   state.isMuted = !state.isMuted;
   if (!state.isMuted && state.isDeafened) state.isDeafened = false; // unmuting lifts deafen, like Discord
   applyMicEnabled();
   applyDeafened();
   setVoiceUI();
+  playCue(state.isMuted ? playMuteSound : playUnmuteSound, 'mute');
+  return true;
 }
 
-function toggleDeafen() {
-  if (!state.isInVoice) return;
+export function toggleDeafen() {
+  if (!state.isInVoice) return false;
   state.isDeafened = !state.isDeafened;
   if (state.isDeafened) {
     mutedBeforeDeafen = state.isMuted;
@@ -647,10 +718,98 @@ function toggleDeafen() {
   applyMicEnabled();
   applyDeafened();
   setVoiceUI();
+  playCue(state.isDeafened ? playDeafenSound : playUndeafenSound, 'mute', { whileDeafened: true });
+  return true;
+}
+
+// "Testar microfone" in the settings page: a level meter fed by the same chain
+// (device, noise suppression, input volume) a call would use, and nothing is
+// sent anywhere. While in a call it just reads the live capture instead of
+// opening a second one.
+let micTest = null; // { stop, gainNode }
+let micTestToken = 0;
+
+function micLevel(data) {
+  let sumSquares = 0;
+  for (let i = 0; i < data.length; i++) {
+    const v = (data[i] - 128) / 128;
+    sumSquares += v * v;
+  }
+  const rms = Math.sqrt(sumSquares / data.length);
+  return rms < 1e-4 ? 0 : Math.min(1, Math.max(0, (20 * Math.log10(rms) + 60) / 60));
+}
+
+// Re-reads the device lists (labels only appear once mic permission exists).
+export function refreshAudioDevices() {
+  populateMicSelect();
+  populateSpeakerSelect();
+}
+
+export function stopMicTest() {
+  micTestToken++;
+  micTest?.stop();
+  micTest = null;
+}
+
+// Resolves to { live } once the meter is running; rejects if no microphone can
+// be opened. onLevel gets a 0-1 value roughly every 60 ms.
+export async function startMicTest(onLevel) {
+  stopMicTest();
+  const token = micTestToken;
+
+  if (state.isInVoice && state.micStream) {
+    const entry = analysers.get('local');
+    if (entry) {
+      const timer = setInterval(() => {
+        entry.analyser.getByteTimeDomainData(entry.data);
+        onLevel(micLevel(entry.data));
+      }, 60);
+      micTest = { stop: () => clearInterval(timer), gainNode: null };
+      return { live: true };
+    }
+  }
+
+  let raw;
+  try {
+    raw = await captureMic(currentMicDeviceId);
+  } catch (err) {
+    if (currentMicDeviceId === 'default') throw err;
+    raw = await captureMic('default');
+  }
+  refreshAudioDevices();
+  const chain = await createMicChain(raw);
+  if (token !== micTestToken) {
+    if (chain) teardownGraph(chain.graph);
+    else raw.getTracks().forEach((t) => t.stop());
+    throw new DOMException('Teste cancelado', 'AbortError');
+  }
+
+  const ctx = ensureAudioCtx();
+  const source = ctx.createMediaStreamSource(chain ? chain.stream : raw);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 512;
+  analyser.smoothingTimeConstant = 0.6;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  const timer = setInterval(() => {
+    analyser.getByteTimeDomainData(data);
+    onLevel(micLevel(data));
+  }, 60);
+  micTest = {
+    gainNode: chain ? chain.graph.gainNode : null,
+    stop() {
+      clearInterval(timer);
+      source.disconnect();
+      if (chain) teardownGraph(chain.graph);
+      else raw.getTracks().forEach((t) => t.stop());
+    },
+  };
+  return { live: false };
 }
 
 // Called on leaving the room (lobby.js) — full silent teardown.
 export function resetVoice() {
+  stopMicTest();
   leaveVoice({ silent: true });
   closeSettingsPopover();
 }
@@ -670,8 +829,25 @@ export function initVoice(theSocket) {
     else if (command === 'toggle-deafen') toggleDeafen();
   });
   settingsBtn.addEventListener('click', toggleSettingsPopover);
-  micSelect.addEventListener('change', handleMicSelectChange);
-  speakerSelect.addEventListener('change', handleSpeakerSelectChange);
+  micSelects.forEach((select) => select.addEventListener('change', handleMicSelectChange));
+  speakerSelects.forEach((select) => select.addEventListener('change', handleSpeakerSelectChange));
+
+  onSettingChange((key) => {
+    if (key === 'inputVolume') {
+      const gain = getSetting('inputVolume') / 100;
+      if (noiseSuppressionGraph) noiseSuppressionGraph.gainNode.gain.value = gain;
+      if (micTest?.gainNode) micTest.gainNode.gain.value = gain;
+    } else if (key === 'outputVolume') {
+      audioSinks.forEach((audio, id) => applyUserVoice(id, audio));
+    } else if (key === 'noiseSuppression' || key === 'echoCancellation' || key === 'autoGainControl') {
+      // Constraints and the RNNoise stage are fixed per capture, so re-capture.
+      if (state.isInVoice && state.micStream) switchMicDevice(currentMicDeviceId);
+    } else if (key === 'pttEnabled') {
+      if (!getSetting('pttEnabled')) pttHeld = false;
+      applyMicEnabled();
+      setVoiceUI();
+    }
+  });
 
   document.addEventListener('click', (e) => {
     if (!settingsPopover.classList.contains('hidden') && !e.target.closest('.user-bar-controls') && !e.target.closest('.user-bar-popover')) {
