@@ -121,7 +121,9 @@
       </div>
     </div>
     <div id="settingsPage" class="settings-page hidden" role="dialog" aria-modal="true" aria-label="Configurações">
+     <div class="settings-panel">
       <nav class="settings-nav" aria-label="Seções das configurações">
+        <button type="button" id="settingsBackBtn" class="settings-back" title="Voltar (Esc)"><span aria-hidden="true">←</span> Voltar</button>
         <div class="settings-nav-title">Configurações</div>
         <button type="button" class="settings-nav-item active" data-section="account">Minha conta</button>
         <button type="button" class="settings-nav-item" data-section="voice">Voz e áudio</button>
@@ -133,8 +135,6 @@
       </nav>
 
       <div class="settings-content">
-        <button type="button" id="settingsCloseBtn" class="settings-close" aria-label="Fechar configurações">✕</button>
-
         <section class="settings-section" data-section="account">
           <h2>Minha conta</h2>
           <div id="settingsGuestNote" class="settings-note hidden">Você está usando o app como convidado. Entre em uma conta para ter um nome fixo, foto de perfil e servidores.</div>
@@ -299,6 +299,8 @@
           </div>
         </section>
       </div>
+      <button type="button" id="settingsCloseBtn" class="settings-close" aria-label="Fechar configurações" title="Fechar (Esc)">✕</button>
+     </div>
     </div>
     <main>
     <div id="lobby" class="card">
