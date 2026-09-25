@@ -46,6 +46,8 @@ const ERROR_TRANSLATIONS = [
   [/email rate limit exceeded/i, 'Muitos e-mails enviados em pouco tempo. Aguarde um pouco e tente de novo.'],
   [/for security purposes, you can only request this after/i, 'Aguarde alguns segundos antes de tentar de novo.'],
   [/signup requires a valid password/i, 'Informe uma senha.'],
+  [/new password should be different/i, 'A nova senha precisa ser diferente da atual.'],
+  [/reauthentication|recently logged in/i, 'Por segurança, saia e entre de novo antes de trocar a senha.'],
   [/to signup, please provide your email/i, 'Informe um e-mail.'],
 ];
 
@@ -61,6 +63,8 @@ function toIdentity(session) {
     accessToken: session.access_token,
     username: displayNameOf(session.user),
     avatarUrl: session.user.user_metadata?.avatar_url || null,
+    userId: session.user.id,
+    email: session.user.email || null,
   };
 }
 
@@ -119,6 +123,42 @@ export async function uploadAvatar(blob) {
     return { error: 'Não foi possível salvar a foto. Tente de novo.' };
   }
 
+  const previousPath = previous?.split('/avatars/')[1];
+  if (previousPath) supabase.storage.from('avatars').remove([previousPath]).catch(() => {});
+  return {};
+}
+
+async function currentUser() {
+  const { data } = await supabase.auth.getSession();
+  return data?.session?.user || null;
+}
+
+// Same { error } convention as signIn. The server re-reads the name from the
+// account (verifyAccount) and the client tells it to refresh — see
+// 'profile-updated' in lobby.js — so the change reaches everyone in the room.
+export async function updateUsername(username) {
+  if (!supabase) return { error: 'Contas não estão configuradas neste servidor.' };
+  const user = await currentUser();
+  if (!user) return { error: 'Entre na sua conta para trocar o nome.' };
+  const { error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, username } });
+  return { error: error ? translateError(error.message) : undefined };
+}
+
+export async function updatePassword(password) {
+  if (!supabase) return { error: 'Contas não estão configuradas neste servidor.' };
+  const { error } = await supabase.auth.updateUser({ password });
+  return { error: error ? translateError(error.message) : undefined };
+}
+
+// Clears the photo from the account and deletes the stored file, so everyone
+// sees the colored initial again.
+export async function removeAvatar() {
+  if (!supabase) return { error: 'Contas não estão configuradas neste servidor.' };
+  const user = await currentUser();
+  if (!user) return { error: 'Entre na sua conta para remover a foto.' };
+  const previous = user.user_metadata?.avatar_url;
+  const { error } = await supabase.auth.updateUser({ data: { ...user.user_metadata, avatar_url: null } });
+  if (error) return { error: 'Não foi possível remover a foto. Tente de novo.' };
   const previousPath = previous?.split('/avatars/')[1];
   if (previousPath) supabase.storage.from('avatars').remove([previousPath]).catch(() => {});
   return {};

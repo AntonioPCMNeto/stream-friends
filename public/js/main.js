@@ -6,6 +6,9 @@ import { initChat } from './chat.js';
 import { initProfilePicture } from './profile.js';
 import { initVoice } from './voice.js';
 import { initVoiceMenu } from './voiceMenu.js';
+import { initTheme } from './theme.js';
+import { initHotkeys } from './hotkeys.js';
+import { initSettingsPage } from './settingsPage.js';
 import { startIceServersRefresh } from './iceServers.js';
 
 const socket = io();
@@ -19,3 +22,6 @@ initChat(socket);
 initProfilePicture();
 initVoice(socket);
 initVoiceMenu();
+initTheme();
+initHotkeys();
+initSettingsPage();

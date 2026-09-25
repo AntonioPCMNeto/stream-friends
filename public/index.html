@@ -7,12 +7,13 @@
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
   <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <script src="js/theme-init.js"></script>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header class="app-header">
     <button id="sidebarToggleBtn" class="sidebar-toggle-btn" aria-label="Mostrar servidores" aria-expanded="false">☰</button>
-    🖥️ Scrima aí v0.1.3
+    🖥️ Scrima aí
   </header>
 
   <div id="appShell">
@@ -113,14 +114,198 @@
         <div id="profileModalName" class="profile-modal-name"></div>
         <div class="profile-modal-actions">
           <button id="profileChooseBtn" type="button" class="btn btn-primary">Escolher foto</button>
+          <button id="profileRemoveBtn" type="button" class="btn btn-ghost btn-danger-text hidden">Remover foto</button>
           <button id="profileSaveBtn" type="button" class="btn btn-primary hidden">Salvar</button>
           <button id="profileCancelBtn" type="button" class="btn btn-ghost hidden">Cancelar</button>
         </div>
       </div>
     </div>
+    <div id="settingsPage" class="settings-page hidden" role="dialog" aria-modal="true" aria-label="Configurações">
+      <nav class="settings-nav" aria-label="Seções das configurações">
+        <div class="settings-nav-title">Configurações</div>
+        <button type="button" class="settings-nav-item active" data-section="account">Minha conta</button>
+        <button type="button" class="settings-nav-item" data-section="voice">Voz e áudio</button>
+        <button type="button" class="settings-nav-item" data-section="keybinds">Atalhos</button>
+        <button type="button" class="settings-nav-item" data-section="notifications">Notificações e sons</button>
+        <button type="button" class="settings-nav-item" data-section="appearance">Aparência</button>
+        <button type="button" id="settingsNavApp" class="settings-nav-item hidden" data-section="app">Aplicativo</button>
+        <button type="button" id="settingsLogoutBtn" class="settings-nav-item settings-nav-danger hidden">Sair da conta</button>
+      </nav>
+
+      <div class="settings-content">
+        <button type="button" id="settingsCloseBtn" class="settings-close" aria-label="Fechar configurações">✕</button>
+
+        <section class="settings-section" data-section="account">
+          <h2>Minha conta</h2>
+          <div id="settingsGuestNote" class="settings-note hidden">Você está usando o app como convidado. Entre em uma conta para ter um nome fixo, foto de perfil e servidores.</div>
+          <div id="settingsAccount">
+            <div class="settings-profile">
+              <span id="settingsAvatar" class="settings-avatar"></span>
+              <div class="settings-profile-info">
+                <div id="settingsProfileName" class="settings-profile-name"></div>
+                <div id="settingsProfileEmail" class="settings-dim"></div>
+              </div>
+              <button id="settingsPhotoBtn" type="button" class="btn btn-ghost">Editar foto de perfil</button>
+            </div>
+            <div class="settings-group">
+              <label class="field">
+                <span>Nome de usuário</span>
+                <input id="settingsUsernameInput" type="text" maxlength="30" autocomplete="off">
+              </label>
+              <button id="settingsUsernameBtn" type="button" class="btn btn-primary">Salvar nome</button>
+            </div>
+            <div class="settings-group">
+              <div class="settings-row"><span>E-mail</span><span id="settingsEmail" class="settings-dim"></span></div>
+              <div class="settings-row">
+                <span>ID da conta</span>
+                <span class="settings-id"><code id="settingsUserId"></code><button id="settingsCopyIdBtn" type="button" class="btn btn-ghost btn-small">Copiar</button></span>
+              </div>
+            </div>
+            <div class="settings-group">
+              <h3>Alterar senha</h3>
+              <label class="field">
+                <span>Nova senha</span>
+                <input id="settingsPasswordInput" type="password" autocomplete="new-password">
+              </label>
+              <label class="field">
+                <span>Confirmar nova senha</span>
+                <input id="settingsPasswordConfirmInput" type="password" autocomplete="new-password">
+              </label>
+              <button id="settingsPasswordBtn" type="button" class="btn btn-primary">Alterar senha</button>
+            </div>
+            <p id="settingsAccountError" class="error"></p>
+          </div>
+        </section>
+
+        <section class="settings-section hidden" data-section="voice">
+          <h2>Voz e áudio</h2>
+          <div class="settings-group">
+            <label class="field">
+              <span>Dispositivo de entrada</span>
+              <select id="settingsMicSelect" class="voice-mic-select" aria-label="Dispositivo de entrada"></select>
+            </label>
+            <div class="settings-slider">
+              <span>Volume de entrada</span>
+              <input id="settingsInputVolume" type="range" min="0" max="200" step="5" aria-label="Volume de entrada">
+              <output id="settingsInputVolumeValue">100%</output>
+            </div>
+            <div class="settings-test">
+              <button id="settingsMicTestBtn" type="button" class="btn btn-ghost">Testar microfone</button>
+              <div class="mic-meter" aria-hidden="true"><div id="settingsMicMeterFill" class="mic-meter-fill"></div></div>
+            </div>
+            <p id="settingsMicTestHint" class="settings-dim settings-hint"></p>
+          </div>
+          <div id="settingsSpeakerRow" class="settings-group hidden">
+            <label class="field">
+              <span>Dispositivo de saída</span>
+              <select id="settingsSpeakerSelect" class="voice-mic-select" aria-label="Dispositivo de saída"></select>
+            </label>
+          </div>
+          <div class="settings-group">
+            <div class="settings-slider">
+              <span>Volume de saída</span>
+              <input id="settingsOutputVolume" type="range" min="0" max="100" step="5" aria-label="Volume de saída">
+              <output id="settingsOutputVolumeValue">100%</output>
+            </div>
+          </div>
+          <div class="settings-group">
+            <h3>Processamento de voz</h3>
+            <label class="settings-check"><input type="checkbox" id="settingsNoiseSuppression"><span>Supressão de ruído<small>Tira ruídos de fundo da sua voz enquanto você fala.</small></span></label>
+            <label class="settings-check"><input type="checkbox" id="settingsEchoCancellation"><span>Cancelamento de eco<small>Evita que o som dos alto-falantes volte pelo seu microfone.</small></span></label>
+            <label class="settings-check"><input type="checkbox" id="settingsAutoGainControl"><span>Controle automático de ganho<small>Nivela sozinho o volume da sua voz.</small></span></label>
+          </div>
+          <div class="settings-group">
+            <h3>Modo de entrada</h3>
+            <label class="settings-check"><input type="checkbox" id="settingsPttEnabled"><span>Apertar para falar<small>O microfone só transmite enquanto você segura a tecla definida em Atalhos, e só com o app em foco.</small></span></label>
+          </div>
+        </section>
+
+        <section class="settings-section hidden" data-section="keybinds">
+          <h2>Atalhos</h2>
+          <div class="settings-group">
+            <div class="settings-keybind" data-key="muteKey">
+              <span class="keybind-label">Silenciar / ativar microfone<small class="keybind-status"></small></span>
+              <button type="button" class="keybind-btn"></button>
+              <button type="button" class="btn btn-ghost btn-small keybind-reset">Restaurar</button>
+            </div>
+            <div class="settings-keybind" data-key="deafenKey">
+              <span class="keybind-label">Ensurdecer / desativar surdina<small class="keybind-status"></small></span>
+              <button type="button" class="keybind-btn"></button>
+              <button type="button" class="btn btn-ghost btn-small keybind-reset">Restaurar</button>
+            </div>
+            <div class="settings-keybind" data-key="pttKey">
+              <span class="keybind-label">Apertar para falar<small class="keybind-status"></small></span>
+              <button type="button" class="keybind-btn"></button>
+              <button type="button" class="btn btn-ghost btn-small keybind-reset">Restaurar</button>
+            </div>
+            <p id="settingsKeybindError" class="error"></p>
+          </div>
+          <div id="settingsGlobalRow" class="settings-group hidden">
+            <label class="settings-check"><input type="checkbox" id="settingsGlobalHotkeys"><span>Usar atalhos globais<small>Silenciar e ensurdecer funcionam mesmo com outro programa em foco, como um jogo. Isso reserva a combinação para o app no computador inteiro.</small></span></label>
+          </div>
+        </section>
+
+        <section class="settings-section hidden" data-section="notifications">
+          <h2>Notificações e sons</h2>
+          <div class="settings-group">
+            <label class="settings-check"><input type="checkbox" id="settingsSoundsJoinLeave"><span>Sons de entrada e saída<small>Um aviso sonoro quando alguém entra ou sai do áudio.</small></span></label>
+            <label class="settings-check"><input type="checkbox" id="settingsSoundsMute"><span>Sons de silenciar e ensurdecer<small>Um aviso sonoro quando você liga ou desliga o microfone ou o áudio.</small></span></label>
+            <div class="settings-slider">
+              <span>Volume dos sons</span>
+              <input id="settingsSoundsVolume" type="range" min="0" max="100" step="5" aria-label="Volume dos sons">
+              <output id="settingsSoundsVolumeValue">100%</output>
+            </div>
+          </div>
+          <div class="settings-group">
+            <label class="settings-check"><input type="checkbox" id="settingsNotifications"><span>Notificações de mensagens<small>Avisa quando chega uma mensagem de chat e o app está em segundo plano.</small></span></label>
+            <p id="settingsNotifHint" class="settings-dim settings-hint"></p>
+          </div>
+        </section>
+
+        <section class="settings-section hidden" data-section="appearance">
+          <h2>Aparência</h2>
+          <div class="settings-group">
+            <label class="field">
+              <span>Tema</span>
+              <select id="settingsTheme" class="voice-mic-select" aria-label="Tema">
+                <option value="dark">Escuro</option>
+                <option value="light">Claro</option>
+                <option value="system">Igual ao sistema</option>
+              </select>
+            </label>
+            <label id="settingsZoomRow" class="field hidden">
+              <span>Zoom da interface</span>
+              <select id="settingsZoom" class="voice-mic-select" aria-label="Zoom da interface">
+                <option value="75">75%</option>
+                <option value="90">90%</option>
+                <option value="100">100%</option>
+                <option value="110">110%</option>
+                <option value="125">125%</option>
+                <option value="150">150%</option>
+                <option value="175">175%</option>
+                <option value="200">200%</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section hidden" data-section="app">
+          <h2>Aplicativo</h2>
+          <div class="settings-group">
+            <label class="settings-check"><input type="checkbox" id="settingsOpenAtLogin"><span>Iniciar com o Windows<small>Abre o Scrima aí quando você entra no computador.</small></span></label>
+            <label class="settings-check"><input type="checkbox" id="settingsStartMinimized"><span>Iniciar minimizado na bandeja<small>Quando iniciado com o Windows, fica só na bandeja até você abri-lo.</small></span></label>
+            <label class="settings-check"><input type="checkbox" id="settingsCloseToTray"><span>Fechar minimiza para a bandeja<small>O botão X esconde a janela e o áudio continua. Desligado, o X fecha o app de verdade.</small></span></label>
+            <p id="settingsDesktopHint" class="settings-dim settings-hint"></p>
+          </div>
+        </section>
+      </div>
+    </div>
     <main>
     <div id="lobby" class="card">
-      <h2 id="lobbyTitle">Entre na sua conta</h2>
+      <div class="lobby-header">
+        <h2 id="lobbyTitle">Entre na sua conta</h2>
+        <button id="lobbySettingsBtn" type="button" class="btn btn-ghost btn-icon" title="Configurações" aria-label="Configurações">⚙️</button>
+      </div>
 
       <div id="authStatus" class="auth-status hidden">
         <span id="authAvatar" class="auth-avatar-wrap avatar-editable" title="Foto de perfil"></span>
@@ -128,7 +313,20 @@
         <button id="signOutBtn" class="btn btn-ghost btn-small">Sair</button>
       </div>
 
-      <p id="authDividerServers" class="auth-divider hidden">Escolha um canal na barra lateral para entrar. Para uma sala avulsa, use o + e a aba "Sala avulsa".</p>
+      <div id="homeView" class="home-view hidden">
+        <section id="homeLiveSection" class="home-section">
+          <h3 class="home-heading">Ao vivo agora</h3>
+          <div id="homeLiveList" class="home-list"></div>
+        </section>
+        <section class="home-section">
+          <h3 class="home-heading">Seus servidores</h3>
+          <div id="homeServersList" class="home-list"></div>
+        </section>
+        <div class="home-actions">
+          <button id="homeAddServerBtn" type="button" class="btn btn-ghost">+ Criar ou entrar em um servidor</button>
+          <button id="homeAdhocRoomBtn" type="button" class="btn btn-ghost">Sala avulsa</button>
+        </div>
+      </div>
 
       <div id="authForm" class="hidden">
         <label class="field">
@@ -270,6 +468,10 @@
             <div id="userBarSpeakerRow" class="hidden">
               <div class="field-label">Saída de áudio</div>
               <select id="voiceSpeakerSelect" class="voice-mic-select" aria-label="Saída de áudio"></select>
+            </div>
+
+            <div class="user-bar-settings-row">
+              <button id="userBarSettingsPageBtn" type="button" class="btn-link">Configurações</button>
             </div>
 
             <div id="userBarProfileRow" class="user-bar-profile-row hidden">

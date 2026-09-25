@@ -196,16 +196,18 @@ function rateLimited(socket, bucket, max, windowMs) {
   return recent.length > max;
 }
 
-// Who's currently in voice in a given channel (= roomId here — see the
-// `rooms` map above; "room" in this file is "channel" in the UI/DB sense).
-// Used both for a new sidebar watcher's initial snapshot and for live
-// updates broadcast to 'watch:<channelId>' — see 'watch-server' below.
+// Who's currently active in a given channel (= roomId here — see the `rooms`
+// map above; "room" in this file is "channel" in the UI/DB sense): in its
+// voice call and/or sharing their screen. `screen` marks a live stream, which
+// is what the home view's "ao vivo" badge and the sidebar are driven by.
+// Used both for a new watcher's initial snapshot and for live updates
+// broadcast to 'watch:<channelId>' — see 'watch-server' below.
 function getVoiceOccupants(roomId) {
   const room = rooms.get(roomId);
   if (!room) return [];
   return Array.from(room.values())
-    .filter((info) => info.sharing.voice)
-    .map((info) => ({ username: info.username, avatar: info.avatar, verified: info.verified }));
+    .filter((info) => info.sharing.voice || info.sharing.screen)
+    .map((info) => ({ username: info.username, avatar: info.avatar, verified: info.verified, screen: info.sharing.screen }));
 }
 
 function broadcastVoiceOccupancy(roomId) {
@@ -298,7 +300,13 @@ io.on('connection', (socket) => {
     if (!info) return;
     info.avatar = account.avatar;
     socket.data.avatar = account.avatar;
+    if (account.username) {
+      info.username = account.username;
+      socket.data.username = account.username;
+    }
+    // 'peer-avatar' is what clients from before renames existed listen for.
     io.to(roomId).emit('peer-avatar', { username: info.username, avatar: account.avatar });
+    io.to(roomId).emit('peer-profile', { id: socket.id, username: info.username, avatar: account.avatar });
     broadcastVoiceOccupancy(roomId);
   });
 
@@ -332,7 +340,7 @@ io.on('connection', (socket) => {
 
     info.sharing[purpose] = Boolean(isSharing);
     socket.to(roomId).emit('peer-share-status', { id: socket.id, purpose, isSharing: info.sharing[purpose] });
-    if (purpose === 'voice') broadcastVoiceOccupancy(roomId);
+    if (purpose === 'voice' || purpose === 'screen') broadcastVoiceOccupancy(roomId);
   });
 
   // A sidebar viewer telling us which channels it wants live voice-occupancy
@@ -432,11 +440,12 @@ io.on('connection', (socket) => {
     const { roomId } = socket.data;
     if (roomId && rooms.has(roomId)) {
       const room = rooms.get(roomId);
-      const wasInVoice = room.get(socket.id)?.sharing.voice;
+      const leaving = room.get(socket.id);
+      const wasListed = leaving?.sharing.voice || leaving?.sharing.screen;
       room.delete(socket.id);
       if (room.size === 0) rooms.delete(roomId);
       socket.to(roomId).emit('peer-left', socket.id);
-      if (wasInVoice) broadcastVoiceOccupancy(roomId);
+      if (wasListed) broadcastVoiceOccupancy(roomId);
     }
   });
 });

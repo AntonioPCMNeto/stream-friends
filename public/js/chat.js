@@ -1,6 +1,8 @@
 import { buildUserAvatar, colorForName, setAvatarUrl } from './identity.js';
 import { getIdentity } from './auth.js';
 import { listMessages } from './rooms.js';
+import { state } from './state.js';
+import { getSetting } from './settings.js';
 
 const MAX_MESSAGE_LENGTH = 500;
 const HISTORY_LIMIT = 50;
@@ -224,11 +226,29 @@ export function clearChat() {
   pendingLive = null;
 }
 
+// A message from someone else while the window isn't the one you're looking at
+// (hidden, minimized to the tray, or behind a game) — only when the user turned
+// notifications on in Configurações and the browser/OS granted permission.
+function notifyMessage(username, text) {
+  if (!getSetting('notifications') || username === state.myUsername) return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  if (document.hasFocus() && !document.hidden) return;
+  try {
+    const notification = new Notification(username, { body: text.length > 140 ? `${text.slice(0, 137)}…` : text });
+    notification.onclick = () => {
+      window.desktop?.showWindow();
+      window.focus();
+      notification.close();
+    };
+  } catch { /* best-effort only */ }
+}
+
 export function initChat(theSocket) {
   socket = theSocket;
 
   socket.on('chat-message', ({ channelId, username, avatar, text, ts }) => {
     setAvatarUrl(username, avatar);
+    notifyMessage(username, text);
     if (channelId !== viewingChannelId) return; // e.g. your own room's chat arriving while you're peeking elsewhere
     if (pendingLive) pendingLive.push({ username, text, ts });
     else appendMessage(username, text, ts);

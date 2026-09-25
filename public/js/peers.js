@@ -815,6 +815,14 @@ export function initPeerSignaling(theSocket) {
     refreshParticipants();
   });
 
+  socket.on('peer-profile', ({ id, username, avatar }) => {
+    const previous = state.peerUsernames.get(id);
+    if (previous && previous !== username) setAvatarUrl(previous, null);
+    if (state.knownPeers.has(id)) state.peerUsernames.set(id, username);
+    setAvatarUrl(username, avatar);
+    refreshParticipants();
+  });
+
   socket.on('peer-avatar', ({ username, avatar }) => {
     setAvatarUrl(username, avatar);
     refreshParticipants();

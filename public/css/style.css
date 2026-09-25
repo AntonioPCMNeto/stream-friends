@@ -77,16 +77,16 @@ main {
 /* The lobby card is centered in <main>, which sits right of the server rail
    + sidebar (76px + 276px), so it looked off-center against the window and
    the header. Reserve the same footprint on its right so it centers on the
-   viewport, shrinking to whatever still fits the 380px card. The lobby is hidden
+   viewport, shrinking to whatever still fits the 640px signed-in card. The lobby is hidden
    with the .hidden class on desktop but an inline display:none on the web
    build, so both have to count as "not showing" or the padding leaks into
    the room. */
 #appShell:has(.server-rail:not(.hidden)) main:has(#lobby:not(.hidden):not([style*="display: none"])) {
-  padding-right: clamp(0px, calc(100vw - 752px), 372px);
+  padding-right: clamp(0px, calc(100vw - 1012px), 372px);
 }
 @media (max-width: 880px) {
   #appShell:has(.server-rail:not(.hidden)) main:has(#lobby:not(.hidden):not([style*="display: none"])) {
-    padding-right: clamp(0px, calc(100vw - 476px), 96px);
+    padding-right: clamp(0px, calc(100vw - 736px), 96px);
   }
 }
 
@@ -228,6 +228,20 @@ main {
   justify-content: center;
 }
 .server-rail-add:hover { background: color-mix(in srgb, var(--speaking) 22%, var(--surface-2)); }
+
+.server-rail-home {
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.server-rail-home:hover { background: color-mix(in srgb, var(--accent) 35%, var(--surface-2)); }
+.server-rail-home.active { background: var(--accent); }
+.server-rail-divider { width: 28px; height: 2px; border-radius: 1px; background: var(--border); flex-shrink: 0; }
 
 /* Persistent servers/channels sidebar for signed-in accounts (see
    lobby.js/rooms.js) — a permanent fixture of the app shell (both the
@@ -910,6 +924,69 @@ body.chat-mode #serverSidebar.hidden ~ main { padding-bottom: 88px; }
 .profile-modal-actions .btn { flex: 1; }
 .profile-modal-actions .btn.hidden { display: none; }
 
+/* Home — what the signed-in lobby card turns into: who is live in your
+   servers right now, and a shortcut into each server. Lives inside #lobby (so
+   every place that already shows/hides the lobby covers it) and just makes
+   that card wider. */
+#lobby.lobby-home { max-width: 640px; }
+#homeView.hidden { display: none; }
+#homeLiveSection.hidden { display: none; }
+.home-view { margin-top: 20px; }
+.home-section { margin-bottom: 22px; }
+.home-heading {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.home-list { display: flex; flex-direction: column; gap: 8px; }
+.home-empty { margin: 0; font-size: 13px; color: var(--text-dim); }
+.home-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+}
+.home-server-card { width: 100%; cursor: pointer; transition: border-color 0.15s; }
+.home-server-card:hover, .home-server-card.selected { border-color: var(--accent); }
+.home-card-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.home-card-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; min-width: 0; }
+.home-card-title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-card-server { font-size: 12px; font-weight: 400; color: var(--text-dim); white-space: nowrap; }
+.home-card-sub { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-avatars { display: flex; align-items: center; }
+.home-avatars .avatar { box-shadow: 0 0 0 2px var(--surface-2); }
+.home-avatars .avatar + .avatar { margin-left: -6px; }
+.home-people { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); min-width: 0; }
+.home-card-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.home-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.home-actions .btn { flex: 1; }
+.avatar-md { width: 36px; height: 36px; font-size: 14px; }
+.live-badge {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--danger);
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+.live-badge-sm { margin-left: 6px; padding: 1px 4px; font-size: 9px; }
+@media (max-width: 520px) {
+  .home-card { flex-wrap: wrap; }
+  .home-card-actions { width: 100%; }
+  .home-card-actions .btn { flex: 1; }
+}
+
 .chat-message-meta {
   display: flex;
   align-items: baseline;
@@ -1435,3 +1512,161 @@ body.chat-mode #serverSidebar.hidden ~ main { padding-bottom: 88px; }
   font-size: 13px;
   cursor: pointer;
 }
+
+/* ---- Settings page (⚙️) ---- */
+.lobby-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.lobby-header h2 { margin: 0; }
+.user-bar-settings-row { margin-top: 14px; }
+.user-bar-settings-row .btn-link { margin: 0; text-align: left; }
+.btn-ghost.btn-danger-text { color: var(--danger); }
+
+.settings-page {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  background: var(--bg);
+  color: var(--text);
+}
+.settings-page.hidden, .settings-page .hidden { display: none; }
+.settings-nav {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 40px 12px 20px 24px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.settings-nav-title {
+  padding: 0 10px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.settings-nav-item {
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-nav-item:hover { background: var(--surface-2); color: var(--text); }
+.settings-nav-item.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
+.settings-nav-danger { margin-top: auto; color: var(--danger); }
+.settings-content { position: relative; flex: 1; min-width: 0; overflow-y: auto; padding: 40px 48px 60px; }
+.settings-section { max-width: 620px; }
+.settings-section h2 { margin: 0 0 20px; font-size: 20px; }
+.settings-close {
+  position: fixed;
+  top: 20px;
+  right: 28px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+}
+.settings-close:hover { color: var(--text); border-color: var(--accent); }
+.settings-group {
+  margin-bottom: 16px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.settings-group h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.settings-group .field:last-child { margin-bottom: 0; }
+.settings-group .field + .btn, .settings-group .field ~ .btn { margin-top: 4px; }
+.settings-note {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+.settings-dim { font-size: 13px; color: var(--text-dim); }
+.settings-hint { margin: 8px 0 0; min-height: 16px; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 14px; }
+.settings-id { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.settings-id code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-dim); }
+.settings-profile { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.settings-avatar { display: inline-flex; flex-shrink: 0; }
+.settings-avatar .avatar { width: 64px; height: 64px; font-size: 26px; }
+.settings-profile-info { flex: 1; min-width: 0; }
+.settings-profile-name { font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-check { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; font-size: 14px; cursor: pointer; }
+.settings-check input { margin-top: 3px; accent-color: var(--accent); }
+.settings-check small { display: block; margin-top: 2px; font-size: 12px; color: var(--text-dim); }
+.settings-slider { display: flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 14px; }
+.settings-slider span { min-width: 120px; }
+.settings-slider input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.settings-slider output { min-width: 48px; text-align: right; color: var(--text-dim); font-size: 13px; }
+.settings-test { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.mic-meter { flex: 1; height: 10px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; }
+.mic-meter-fill { width: 0; height: 100%; background: var(--speaking); transition: width 0.06s linear; }
+.settings-keybind { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.keybind-label { flex: 1; min-width: 0; font-size: 14px; }
+.keybind-status { display: block; margin-top: 2px; font-size: 12px; color: var(--text-dim); }
+.keybind-btn {
+  min-width: 190px;
+  padding: 7px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.keybind-btn:hover { border-color: var(--accent); }
+.keybind-btn.recording { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 720px) {
+  .settings-page { flex-direction: column; }
+  .settings-nav { width: auto; flex-direction: row; gap: 4px; padding: 12px 56px 12px 12px; border-right: none; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; }
+  .settings-nav-title { display: none; }
+  .settings-nav-item { flex-shrink: 0; white-space: nowrap; }
+  .settings-nav-danger { margin-top: 0; }
+  .settings-content { padding: 20px 16px 60px; }
+  .settings-close { top: 10px; right: 10px; }
+  .settings-keybind { flex-wrap: wrap; }
+  .settings-slider span { min-width: 90px; }
+}
+
+/* ---- Light theme (Configurações > Aparência) ---- */
+:root { color-scheme: dark; }
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f4f8;
+  --surface: #ffffff;
+  --surface-2: #eceef4;
+  --border: #d3d6e0;
+  --text: #1b1d27;
+  --text-dim: #565a6b;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --danger: #c62d2d;
+  --speaking: #1e8f4e;
+}
+:root[data-theme="light"] body { background: radial-gradient(circle at top, #ffffff, var(--bg) 60%); }
+:root[data-theme="light"] .btn-ghost:hover { background: #e2e5ee; }
+:root[data-theme="light"] .btn-primary:disabled { background: #b5b8c6; }
+:root[data-theme="light"] .auth-notice { color: #15803d; }
