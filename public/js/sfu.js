@@ -12,8 +12,8 @@ import { showToast } from './toast.js';
 
 const LIVEKIT_MODULE = '../vendor/livekit-client.esm.mjs';
 const TOKEN_TIMEOUT_MS = 3000;
-// "Auto" means no cap in the mesh; LiveKit wants a number, so use the highest preset.
-export const AUTO_BITRATE_KBPS = 15000;
+// "Auto" means no cap in the mesh; LiveKit wants a number, so Auto is 8 Mbps there.
+export const AUTO_BITRATE_KBPS = 8000;
 // Firefox's only H.264 codec is OpenH264 (Baseline, no hardware path) — see
 // the matching const in peers.js. Used below to keep Firefox off the
 // High/Main profiles the SFU steers Chromium encoders toward (it can't

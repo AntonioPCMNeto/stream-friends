@@ -8,7 +8,7 @@ export const state = {
   isSharingScreen: false,
   isSharingWebcam: false,
   webcamFacing: 'user', // 'user' | 'environment' — which camera to request (matters on phones)
-  videoBitrateKbps: 10000, // null/0 = auto (browser default, no cap) — screen only
+  videoBitrateKbps: null, // null/0 = auto (browser default, no cap) — screen only
   videoFramerateFps: 30, // screen only; webcam uses a fixed default (see share.js)
   // Voice chat (full mesh, purpose 'voice' — see voice.js). Independent of
   // screen/webcam sharing.
