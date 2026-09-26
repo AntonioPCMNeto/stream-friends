@@ -38,12 +38,17 @@ export function buildAvatar(name, url) {
       el.style.backgroundSize = 'cover';
       el.style.backgroundPosition = 'center';
       el.textContent = '';
+      el.dataset.photo = url;
     };
     img.src = url;
   }
   return el;
 }
 
+// data-user marks an avatar as a person's (profile.js opens the full picture on
+// click once data-photo says there is one); a server icon never gets it.
 export function buildUserAvatar(name) {
-  return buildAvatar(name, avatarUrls.get(name));
+  const el = buildAvatar(name, avatarUrls.get(name));
+  el.dataset.user = name;
+  return el;
 }

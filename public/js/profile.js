@@ -28,7 +28,36 @@ export function openProfileModal() {
   openModalImpl?.();
 }
 
+// Click anyone's avatar that has a picture to see it large. Capture phase so it
+// wins over the row/card the avatar sits in (join channel, open server...);
+// your own avatars keep opening the edit dialog.
+function initAvatarViewer() {
+  const backdrop = document.getElementById('avatarViewBackdrop');
+  const preview = document.getElementById('avatarViewPreview');
+  const nameEl = document.getElementById('avatarViewName');
+  const close = () => backdrop.classList.add('hidden');
+
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('.avatar[data-user][data-photo]');
+    if (!el || el.closest('.avatar-editable')) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const avatar = buildAvatar(el.dataset.user, el.dataset.photo);
+    avatar.classList.add('avatar-xxl');
+    preview.replaceChildren(avatar);
+    nameEl.textContent = el.dataset.user;
+    backdrop.classList.remove('hidden');
+  }, true);
+
+  document.getElementById('avatarViewCloseBtn').addEventListener('click', close);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !backdrop.classList.contains('hidden')) close();
+  });
+}
+
 export function initProfilePicture() {
+  initAvatarViewer();
   const input = document.getElementById('avatarFileInput');
   const backdrop = document.getElementById('profileModalBackdrop');
   const preview = document.getElementById('profilePreview');

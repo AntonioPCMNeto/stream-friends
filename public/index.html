@@ -120,6 +120,16 @@
         </div>
       </div>
     </div>
+    <div id="avatarViewBackdrop" class="modal-backdrop hidden">
+      <div class="modal profile-modal" role="dialog" aria-modal="true" aria-label="Foto de perfil">
+        <div class="modal-header">
+          <span>Foto de perfil</span>
+          <button id="avatarViewCloseBtn" class="chat-close-btn" aria-label="Fechar">✕</button>
+        </div>
+        <div id="avatarViewPreview" class="profile-preview"></div>
+        <div id="avatarViewName" class="profile-modal-name"></div>
+      </div>
+    </div>
     <div id="settingsPage" class="settings-page hidden" role="dialog" aria-modal="true" aria-label="Configurações">
      <div class="settings-panel">
       <nav class="settings-nav" aria-label="Seções das configurações">
@@ -430,12 +440,11 @@
                 </div>
                 <div>
                   <div class="field-label">Bitrate</div>
-                  <div id="bitrateGroup" class="segmented" data-value="10000" role="group" aria-label="Bitrate">
-                    <button type="button" data-value="" aria-pressed="false">Auto</button>
+                  <div id="bitrateGroup" class="segmented" data-value="" role="group" aria-label="Bitrate">
+                    <button type="button" data-value="" class="active" aria-pressed="true">Auto</button>
                     <button type="button" data-value="3000" aria-pressed="false">3 Mbps</button>
                     <button type="button" data-value="6000" aria-pressed="false">6 Mbps</button>
-                    <button type="button" data-value="10000" class="active" aria-pressed="true">10 Mbps</button>
-                    <button type="button" data-value="15000" aria-pressed="false">15 Mbps</button>
+                    <button type="button" data-value="10000" aria-pressed="false">10 Mbps</button>
                   </div>
                 </div>
               </div>
