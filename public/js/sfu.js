@@ -12,8 +12,26 @@ import { showToast } from './toast.js';
 
 const LIVEKIT_MODULE = '../vendor/livekit-client.esm.mjs';
 const TOKEN_TIMEOUT_MS = 3000;
-// "Auto" means no cap in the mesh; LiveKit wants a number, so Auto is 8 Mbps there.
-export const AUTO_BITRATE_KBPS = 8000;
+// "Auto" means no cap in the mesh; LiveKit wants a number, so on the SFU it is
+// sized to what is being captured: 4 Mbps at 720p30, growing with the square
+// root of pixels-per-second (1080p30 ≈ 6, 1080p60 ≈ 8.5, capped at the
+// selector's top preset). A flat number was too generous for small captures and
+// too tight for big ones, and either way overshoots what a home uplink carries
+// once several viewers are subscribed.
+const AUTO_BASE_KBPS = 4000;
+const AUTO_BASE_PIXELS_PER_SEC = 1280 * 720 * 30;
+const AUTO_MIN_KBPS = 1500;
+const AUTO_MAX_KBPS = 10000;
+const AUTO_FALLBACK_KBPS = 8000; // capture size unknown
+
+export function autoBitrateKbps(purpose) {
+  const stream = purpose === 'webcam' ? state.webcamStream : state.screenStream;
+  const { width, height } = stream?.getVideoTracks()[0]?.getSettings() || {};
+  const fps = hooks.encodingTarget(purpose).fps || 30;
+  if (!width || !height) return AUTO_FALLBACK_KBPS;
+  const kbps = AUTO_BASE_KBPS * Math.sqrt((width * height * fps) / AUTO_BASE_PIXELS_PER_SEC);
+  return Math.min(AUTO_MAX_KBPS, Math.max(AUTO_MIN_KBPS, Math.round(kbps / 100) * 100));
+}
 // Firefox's only H.264 codec is OpenH264 (Baseline, no hardware path) — see
 // the matching const in peers.js. Used below to keep Firefox off the
 // High/Main profiles the SFU steers Chromium encoders toward (it can't
@@ -21,7 +39,7 @@ export const AUTO_BITRATE_KBPS = 8000;
 const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
 
 let socket = null;
-let hooks = { encodingTarget: () => ({ kbps: null, fps: null }), onDecided: () => {}, preferHardwareH264: () => {} };
+let hooks = { encodingTarget: () => ({ kbps: null, fps: null }), onDecided: () => {}, onViewersChanged: () => {}, preferHardwareH264: () => {} };
 
 let lk = null; // livekit-client module, imported the first time a join gets a token
 let room = null;
@@ -118,6 +136,13 @@ function wireRoom(r) {
     renderTiles();
   });
 
+  // Someone joined, left or just subscribed to one of our tracks: dynacast flips
+  // the encoder on a moment later, and the sharer's idle-capture throttle has to
+  // follow that right away or the new viewer's first keyframe waits on a 1 fps
+  // capture (a black tile until the next stats tick, or until the picture moves).
+  [RoomEvent.LocalTrackSubscribed, RoomEvent.ParticipantConnected, RoomEvent.ParticipantDisconnected]
+    .forEach((event) => r.on(event, () => hooks.onViewersChanged()));
+
   r.on(RoomEvent.Disconnected, () => {
     if (r !== room) return; // we disconnected it ourselves
     console.error('[sfu] connection to the video server was lost');
@@ -203,7 +228,7 @@ export function disconnectSfu() {
 function videoPublishOptions(purpose) {
   const isScreen = purpose === 'screen';
   const { kbps, fps } = hooks.encodingTarget(purpose);
-  const encoding = { maxBitrate: (kbps || AUTO_BITRATE_KBPS) * 1000, maxFramerate: fps || undefined, priority: 'high' };
+  const encoding = { maxBitrate: (kbps || autoBitrateKbps(purpose)) * 1000, maxFramerate: fps || undefined, priority: 'high' };
   return {
     source: isScreen ? lk.Track.Source.ScreenShare : lk.Track.Source.Camera,
     // Hardware-encodable on every GPU vendor, same reasoning as preferHardwareH264

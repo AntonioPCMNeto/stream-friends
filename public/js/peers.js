@@ -6,7 +6,7 @@ import { refreshParticipants } from './participants.js';
 import { setAvatarUrl } from './identity.js';
 import {
   initSfu, beginTransport, disconnectSfu, transportMode, transportDecided,
-  publishStream, unpublishStream, replacePublishedStream, getPublishedVideoSender, AUTO_BITRATE_KBPS,
+  publishStream, unpublishStream, replacePublishedStream, getPublishedVideoSender, autoBitrateKbps,
   hasSfuViewers, sfuViewerCount, setSfuWatching, collectSfuStats,
 } from './sfu.js';
 
@@ -275,7 +275,7 @@ function applyEncodingParams(sender, purpose) {
   if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
   const enc = params.encodings[0];
   const { kbps: bitrateKbps, fps: framerateFps } = encodingTarget(purpose);
-  const cappedKbps = bitrateKbps || (outgoingVia[purpose] === 'sfu' ? AUTO_BITRATE_KBPS : null);
+  const cappedKbps = bitrateKbps || (outgoingVia[purpose] === 'sfu' ? autoBitrateKbps(purpose) : null);
   enc.maxBitrate = cappedKbps ? cappedKbps * 1000 : undefined;
   enc.maxFramerate = framerateFps || undefined;
   enc.scaleResolutionDownBy = 1;
@@ -444,6 +444,68 @@ function logStreamDiag(purpose, report, codecName, path) {
   );
 }
 
+// Loss / retransmit / freeze counters are cumulative, so each sample is turned
+// into what happened since the previous one. That tells apart a sharer whose
+// uplink is struggling ('out': NACKs, keyframe requests, and the loss the far
+// end reports back) from a viewer whose link or decoder is ('in': loss, freezes,
+// dropped frames) — the two look identical as "low fps" on the tile. Returns a
+// badge note (only while something is wrong) and logs at most one console line
+// per key every 10 s.
+const netCounters = new Map(); // key -> previous cumulative counters
+const lastNetLog = new Map(); // key -> performance.now() of the last console line
+const NET_LOG_INTERVAL_MS = 10000;
+const NET_LOSS_WARN_PCT = 0.5;
+
+function netSample(key, direction, report, statsReport) {
+  let cur;
+  let jitter;
+  let rtt = null;
+  if (direction === 'in') {
+    cur = {
+      lost: report.packetsLost || 0, packets: report.packetsReceived || 0, nack: report.nackCount || 0,
+      pli: report.pliCount || 0, freezes: report.freezeCount || 0, dropped: report.framesDropped || 0,
+    };
+    jitter = report.jitter;
+  } else {
+    let remote = null;
+    statsReport?.forEach((r) => { if (r.type === 'remote-inbound-rtp' && r.ssrc === report.ssrc) remote = r; });
+    cur = {
+      lost: remote?.packetsLost || 0, packets: report.packetsSent || 0, nack: report.nackCount || 0,
+      pli: report.pliCount || 0, freezes: 0, dropped: 0,
+    };
+    jitter = remote?.jitter;
+    rtt = remote?.roundTripTime;
+  }
+
+  const prev = netCounters.get(key);
+  netCounters.set(key, cur);
+  if (!prev) return '';
+  const delta = (field) => Math.max(0, cur[field] - prev[field]);
+  const lost = delta('lost');
+  const packets = delta('packets');
+  const lossPct = lost + packets > 0 ? (lost * 100) / (lost + packets) : 0;
+  const nack = delta('nack');
+  const pli = delta('pli');
+  const freezes = delta('freezes');
+  const dropped = delta('dropped');
+
+  const lossy = lossPct >= NET_LOSS_WARN_PCT;
+  const now = performance.now();
+  if ((lossy || pli || freezes || dropped) && now - (lastNetLog.get(key) ?? -Infinity) > NET_LOG_INTERVAL_MS) {
+    lastNetLog.set(key, now);
+    const ms = (s) => (s != null ? Math.round(s * 1000) : '?');
+    console.log(
+      `[net:${direction === 'in' ? 'watch' : 'send'} ${key}] loss=${lossPct.toFixed(1)}% (${lost} pkts) nack=${nack} pli=${pli} ` +
+      `freezes=${cur.freezes}(+${freezes}) dropped=+${dropped} jitter=${ms(jitter)}ms rtt=${ms(rtt)}ms`
+    );
+  }
+
+  let note = '';
+  if (lossy) note += ` · ⚠loss ${lossPct.toFixed(1)}%`;
+  if (cur.freezes > 0) note += ` · ❄${cur.freezes} freeze${cur.freezes === 1 ? '' : 's'}`;
+  return note;
+}
+
 // Live capture-framerate measurement for a solo-sharer tile (no viewer =
 // no outbound RTP to read framesPerSecond from), tracked independently per
 // purpose since screen and webcam can each be un-viewed at different times.
@@ -567,6 +629,7 @@ async function pollStats() {
       if (reason && reason !== 'none') note += ` · ⚠${reason}`; // 'cpu' or 'bandwidth'
       if (path?.relayed) note += ' · relay';
       if (outbound.powerEfficientEncoder != null) note += outbound.powerEfficientEncoder ? ' · HW enc' : ' · ⚠SW enc';
+      note += netSample(`local:${purpose}`, 'out', outbound, report);
       applyStatsSample(`local:${purpose}`, outbound, 'bytesSent', note);
 
       if (!streamUpLogged[purpose] && outbound.encoderImplementation && outbound.frameWidth) {
@@ -594,7 +657,7 @@ async function pollStats() {
       stopFrameCounter(purpose); // not sharing this purpose — release the clone if one lingered
     }
   }
-  inboundByKey.forEach((report, key) => applyStatsSample(key, report, 'bytesReceived'));
+  inboundByKey.forEach((report, key) => applyStatsSample(key, report, 'bytesReceived', netSample(key, 'in', report)));
 }
 
 async function sendOffer(pc, peerId, purpose) {
@@ -669,11 +732,22 @@ export async function startOutgoing(purpose) {
   refreshCaptureThrottle();
 }
 
+// The server forgets who was sharing whenever it restarts or we rejoin, and
+// announceSharingStatus normally only fires when a share starts — so a resumed
+// share has to say so again or the roster, "ao vivo" and voice occupancy stay off.
+// Also runs the throttle check now and again as dynacast catches up: a viewer's
+// subscription reaches the encoder a few hundred ms after it happens.
+function settleViewerActivity() {
+  refreshCaptureThrottle();
+  [300, 1000, 2500].forEach((ms) => setTimeout(refreshCaptureThrottle, ms));
+}
+
 // Runs when a join settles on a transport: (re)sends whatever we're already
 // sharing — the case after a reconnect — on it.
 function onTransportDecided(result) {
   PURPOSES.forEach((purpose) => {
     if (!localStreamFor(purpose)) return;
+    announceSharingStatus(purpose, true);
     sendOutgoing(purpose, result)
       .then(refreshCaptureThrottle)
       .catch((err) => console.error(`Failed to resend ${purpose}:`, err));
@@ -763,6 +837,7 @@ export function initPeerSignaling(theSocket) {
   initSfu(theSocket, {
     encodingTarget,
     onDecided: onTransportDecided,
+    onViewersChanged: settleViewerActivity,
     preferHardwareH264: (pc, sender) => preferHardwareH264(pc, sender, sfuH264Score),
   });
   setInterval(pollStats, 2000);

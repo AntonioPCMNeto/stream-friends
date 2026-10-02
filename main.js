@@ -17,6 +17,14 @@ function lowerPriority() {
   }
 }
 
+// Chromium demotes a hidden or covered renderer to background priority on
+// Windows, and the renderer is what packetizes and paces the outgoing RTP — so
+// a share started from a window sitting behind a game loses frames to the game's
+// threads. Deliberately NOT disabling native window occlusion or timer
+// throttling: the viewer auto-pause and the hidden-window skips in the stats
+// poll rely on document.hidden turning true when a game covers the window.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+
 let mainWindow = null;
 let tray = null;
 let quitting = false;
