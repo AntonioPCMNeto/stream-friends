@@ -162,6 +162,32 @@ function wireRoom(r) {
   });
 }
 
+function signalUrls(directUrl) {
+  if (!/^https?:$/.test(location.protocol)) return [directUrl]; // the desktop app (file://) has no same origin
+  return [`${location.origin.replace(/^http/, 'ws')}/sfu`, directUrl];
+}
+
+function createRoom() {
+  const r = new lk.Room({
+    // Tiles are plain <video> elements fed from state.streams, not attach()ed
+    // LiveKit elements, so adaptive streaming has nothing to measure.
+    adaptiveStream: false,
+    // Pauses the encoder while nobody is subscribed to our track.
+    dynacast: true,
+    stopLocalTrackOnUnpublish: false,
+  });
+  wireRoom(r);
+  // Fires once the sender exists but before the offer is built, which is the
+  // window to steer codec selection towards a hardware-encodable H.264.
+  r.localParticipant.on(lk.ParticipantEvent.LocalSenderCreated, (sender, track) => {
+    const publisher = r.engine.pcManager?.publisher;
+    if (track.kind === lk.Track.Kind.Video && publisher) {
+      hooks.preferHardwareH264({ getTransceivers: () => publisher.getTransceivers() }, sender);
+    }
+  });
+  return r;
+}
+
 async function connect(mine) {
   const stale = () => mine !== generation;
   const settle = (next) => {
@@ -171,6 +197,7 @@ async function connect(mine) {
 
   let candidate = null;
   let sfuUrl = null;
+  const failures = [];
   try {
     const reply = await requestToken();
     if (stale()) return mode;
@@ -180,24 +207,23 @@ async function connect(mine) {
     lk = lk || await import(LIVEKIT_MODULE);
     if (stale()) return mode;
 
-    candidate = new lk.Room({
-      // Tiles are plain <video> elements fed from state.streams, not attach()ed
-      // LiveKit elements, so adaptive streaming has nothing to measure.
-      adaptiveStream: false,
-      // Pauses the encoder while nobody is subscribed to our track.
-      dynacast: true,
-      stopLocalTrackOnUnpublish: false,
-    });
-    wireRoom(candidate);
-    // Fires once the sender exists but before the offer is built, which is the
-    // window to steer codec selection towards a hardware-encodable H.264.
-    candidate.localParticipant.on(lk.ParticipantEvent.LocalSenderCreated, (sender, track) => {
-      const publisher = candidate.engine.pcManager?.publisher;
-      if (track.kind === lk.Track.Kind.Video && publisher) {
-        hooks.preferHardwareH264({ getTransceivers: () => publisher.getTransceivers() }, sender);
+    // The same-origin proxy first (see /sfu in server.js), then the SFU's own
+    // address: a network or content blocker that flags the SFU hostname only
+    // breaks the second, and an older server without the proxy fails the first
+    // with a 404 straight away.
+    for (const url of signalUrls(reply.url)) {
+      const attempt = createRoom();
+      try {
+        await attempt.connect(url, reply.token);
+        candidate = attempt;
+        break;
+      } catch (err) {
+        attempt.disconnect();
+        failures.push({ via: url === reply.url ? 'direct' : 'proxy', error: err });
+        if (stale()) return mode;
       }
-    });
-    await candidate.connect(reply.url, reply.token);
+    }
+    if (!candidate) throw failures[failures.length - 1].error;
     if (stale()) {
       candidate.disconnect();
       return mode;
@@ -208,7 +234,7 @@ async function connect(mine) {
   } catch (err) {
     console.error('[sfu] falling back to the peer-to-peer mesh:', err);
     candidate?.disconnect();
-    if (!stale()) reportSfuFailure(err, socket, sfuUrl);
+    if (!stale()) reportSfuFailure(failures.length ? failures : [{ via: 'setup', error: err }], socket, sfuUrl);
     return settle('mesh');
   }
 }

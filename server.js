@@ -2,6 +2,9 @@ require('dotenv').config();
 
 const express = require('express');
 const http = require('http');
+const https = require('https');
+const net = require('net');
+const tls = require('tls');
 const { Server } = require('socket.io');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -76,6 +79,85 @@ const AccessToken = livekitEnabled ? require('livekit-server-sdk').AccessToken :
 // same-origin policy would otherwise protect.
 const io = new Server(server, {
   cors: { origin: '*' },
+  // The default closes any upgrade that isn't Socket.IO's if nothing has been
+  // written within a second — too short for the /sfu proxy below to reach the
+  // SFU. Unclaimed upgrades are destroyed by the handler there instead.
+  destroyUpgrade: false,
+});
+
+// Signaling for the SFU goes through this server too (wss://<this host>/sfu/rtc/…)
+// so the browser only ever talks to the app's own origin: content blockers and
+// network filters that flag the SFU's dynamic-DNS hostname never see it. Only the
+// small signaling WebSocket and its HTTP probe are relayed — media still flows
+// directly between the browser and the SFU over WebRTC. LiveKit itself refuses
+// anything without a valid token, and only its /rtc endpoints are reachable here.
+const SFU_PROXY_PREFIX = '/sfu';
+const SFU_PROXY_CONNECT_TIMEOUT_MS = 10000;
+const sfuTarget = (() => {
+  if (!livekitEnabled) return null;
+  try {
+    const url = new URL(LIVEKIT_URL);
+    const secure = url.protocol === 'wss:' || url.protocol === 'https:';
+    return { host: url.hostname, port: Number(url.port) || (secure ? 443 : 80), hostHeader: url.host, secure };
+  } catch {
+    return null;
+  }
+})();
+
+function sfuProxyPath(url) {
+  if (!sfuTarget || !url.startsWith(`${SFU_PROXY_PREFIX}/rtc`)) return null;
+  return url.slice(SFU_PROXY_PREFIX.length);
+}
+
+app.use(SFU_PROXY_PREFIX, (req, res, next) => {
+  const path = sfuProxyPath(`${SFU_PROXY_PREFIX}${req.url}`);
+  if (!path) return next();
+  const headers = { ...req.headers, host: sfuTarget.hostHeader };
+  const upstream = (sfuTarget.secure ? https : http).request(
+    { host: sfuTarget.host, port: sfuTarget.port, path, method: req.method, headers, servername: sfuTarget.host, timeout: SFU_PROXY_CONNECT_TIMEOUT_MS },
+    (upstreamRes) => {
+      res.writeHead(upstreamRes.statusCode, upstreamRes.headers);
+      upstreamRes.pipe(res);
+    }
+  );
+  upstream.on('timeout', () => upstream.destroy(new Error('sfu proxy timeout')));
+  upstream.on('error', () => {
+    if (!res.headersSent) res.status(502).end();
+    else res.destroy();
+  });
+  req.pipe(upstream);
+});
+
+server.on('upgrade', (req, socket, head) => {
+  const path = sfuProxyPath(req.url);
+  if (!path) {
+    if (!req.url.startsWith('/socket.io/')) socket.destroy();
+    return;
+  }
+  const options = { host: sfuTarget.host, port: sfuTarget.port, servername: sfuTarget.host, timeout: SFU_PROXY_CONNECT_TIMEOUT_MS };
+  const upstream = sfuTarget.secure ? tls.connect(options) : net.connect(options);
+  const close = () => {
+    socket.destroy();
+    upstream.destroy();
+  };
+  upstream.once(sfuTarget.secure ? 'secureConnect' : 'connect', () => {
+    upstream.setTimeout(0);
+    let requestHead = `${req.method} ${path} HTTP/1.1\r\n`;
+    for (let i = 0; i < req.rawHeaders.length; i += 2) {
+      const name = req.rawHeaders[i];
+      const value = name.toLowerCase() === 'host' ? sfuTarget.hostHeader : req.rawHeaders[i + 1];
+      requestHead += `${name}: ${value}\r\n`;
+    }
+    upstream.write(`${requestHead}\r\n`);
+    if (head.length) upstream.write(head);
+    socket.pipe(upstream);
+    upstream.pipe(socket);
+  });
+  upstream.on('timeout', close);
+  upstream.on('error', close);
+  upstream.on('close', close);
+  socket.on('error', close);
+  socket.on('close', close);
 });
 
 // Baseline response headers. Deliberately not a full CSP: SUPABASE_URL and

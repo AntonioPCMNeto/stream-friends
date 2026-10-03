@@ -5,8 +5,9 @@ import { showToast } from './toast.js';
 
 const PROBE_TIMEOUT_MS = 6000;
 
-function describeError(err) {
+function describeError({ via, error: err }) {
   return {
+    via,
     name: err?.name,
     message: err?.message,
     reason: err?.reasonName ?? err?.reason,
@@ -49,7 +50,7 @@ function probeWebSocket(wsUrl) {
   });
 }
 
-async function collect(err, socket, sfuUrl) {
+async function collect(failures, socket, sfuUrl) {
   const host = sfuUrl ? new URL(sfuUrl).host : null;
   const [https, websocket] = host
     ? await Promise.all([probeHttps(`https://${host}`), probeWebSocket(`wss://${host}/rtc/v1`)])
@@ -63,12 +64,12 @@ async function collect(err, socket, sfuUrl) {
     network: conn ? { type: conn.type, effectiveType: conn.effectiveType, rtt: conn.rtt } : undefined,
     appSocket: { connected: socket?.connected, transport: socket?.io?.engine?.transport?.name },
     sfuHost: host,
-    error: describeError(err),
+    attempts: failures.map(describeError),
     probes: { https, websocket },
   };
 }
 
-export function reportSfuFailure(err, socket, sfuUrl) {
+export function reportSfuFailure(failures, socket, sfuUrl) {
   let copied = null;
   const copy = async () => {
     try {
@@ -78,7 +79,7 @@ export function reportSfuFailure(err, socket, sfuUrl) {
       showToast('Não foi possível copiar. Use o console: scrimaSfuDiagnostic', 'error', { duration: 6000 });
     }
   };
-  copied = collect(err, socket, sfuUrl).then((d) => {
+  copied = collect(failures, socket, sfuUrl).then((d) => {
     window.scrimaSfuDiagnostic = d;
     console.error('[sfu] diagnostic', d);
     return d;
