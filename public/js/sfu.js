@@ -9,6 +9,7 @@
 import { state } from './state.js';
 import { renderTiles } from './tiles.js';
 import { showToast } from './toast.js';
+import { reportSfuFailure } from './sfuDiagnostic.js';
 
 const LIVEKIT_MODULE = '../vendor/livekit-client.esm.mjs';
 const TOKEN_TIMEOUT_MS = 3000;
@@ -159,10 +160,12 @@ async function connect(mine) {
   };
 
   let candidate = null;
+  let sfuUrl = null;
   try {
     const reply = await requestToken();
     if (stale()) return mode;
     if (!reply?.enabled) return settle('mesh');
+    sfuUrl = reply.url;
 
     lk = lk || await import(LIVEKIT_MODULE);
     if (stale()) return mode;
@@ -195,7 +198,7 @@ async function connect(mine) {
   } catch (err) {
     console.error('[sfu] falling back to the peer-to-peer mesh:', err);
     candidate?.disconnect();
-    if (!stale()) showToast('Servidor de vídeo indisponível — usando conexão direta (P2P).', 'error');
+    if (!stale()) reportSfuFailure(err, socket, sfuUrl);
     return settle('mesh');
   }
 }

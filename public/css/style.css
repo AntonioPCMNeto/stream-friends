@@ -1471,6 +1471,7 @@ body.chat-mode #serverSidebar.hidden ~ main { padding-bottom: 88px; }
 }
 .toast-hide { opacity: 0; }
 .toast-error { border-left: 3px solid var(--danger); }
+.toast-action { pointer-events: auto; cursor: pointer; }
 
 /* Right-click a member -> local volume slider (voiceMenu.js). */
 .voice-menu {
