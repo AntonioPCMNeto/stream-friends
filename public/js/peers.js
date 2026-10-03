@@ -869,6 +869,7 @@ export function initPeerSignaling(theSocket) {
     // we paused — start from a clean slate and re-send it if we're hidden.
     autoPausedKeys.clear();
     syncViewerVisibility();
+    renderTiles();
     refreshParticipants();
   });
 
@@ -887,6 +888,7 @@ export function initPeerSignaling(theSocket) {
     if (state.isSharingScreen && outgoingVia.screen === 'mesh') callPeer(id, 'screen');
     if (state.isSharingWebcam && outgoingVia.webcam === 'mesh') callPeer(id, 'webcam');
     showToast(`${username} entrou na sala`);
+    renderTiles();
     refreshParticipants();
   });
 
@@ -960,6 +962,9 @@ export function initPeerSignaling(theSocket) {
   // server, routed to the connection for the signaled purpose.
   socket.on('signal', async ({ from, purpose, data }) => {
     if (!PURPOSES.includes(purpose)) return; // voice.js owns the 'voice' mesh
+    // A peer that already left can still have an offer in flight; answering it
+    // would resurrect a connection (and a tile) nothing will ever clean up.
+    if (!state.knownPeers.has(from)) return;
     const pc = getOrCreatePeerConnection(from, purpose);
 
     if (data.type === 'offer') {

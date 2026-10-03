@@ -322,7 +322,11 @@ export function renderTiles() {
   for (const [key, stream] of state.streams) {
     const peerId = key.slice(0, key.lastIndexOf(':'));
     const purpose = purposeOfKey(key);
-    const name = state.peerUsernames.get(peerId) || `Usuário ${peerId.slice(0, 5)}`;
+    // A stream can outlive its peer (late SFU track, in-flight signal after
+    // peer-left) or beat the peer's announcement; show it only while the peer
+    // is actually in the room.
+    if (!state.knownPeers.has(peerId)) continue;
+    const name = state.peerUsernames.get(peerId) || 'Alguém';
     desired.set(key, {
       stream,
       label: `${name} — ${PURPOSE_LABEL[purpose] || purpose}`,

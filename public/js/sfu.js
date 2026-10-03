@@ -144,6 +144,16 @@ function wireRoom(r) {
   [RoomEvent.LocalTrackSubscribed, RoomEvent.ParticipantConnected, RoomEvent.ParticipantDisconnected]
     .forEach((event) => r.on(event, () => hooks.onViewersChanged()));
 
+  // The server's 'peer-left' normally clears these first; this covers a track
+  // that was still being subscribed when the participant went away.
+  r.on(RoomEvent.ParticipantDisconnected, (participant) => {
+    let removed = false;
+    ['screen', 'webcam'].forEach((purpose) => {
+      removed = state.streams.delete(`${participant.identity}:${purpose}`) || removed;
+    });
+    if (removed) renderTiles();
+  });
+
   r.on(RoomEvent.Disconnected, () => {
     if (r !== room) return; // we disconnected it ourselves
     console.error('[sfu] connection to the video server was lost');
