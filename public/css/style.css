@@ -395,6 +395,10 @@ body:has(#voiceConnectedBar:not(.hidden)) #serverSidebar { padding-bottom: 100px
 .create-channel-popover { top: 120px; left: 80px; }
 .server-menu:popover-open { display: flex; flex-direction: column; gap: 2px; }
 .create-channel-popover:popover-open { display: block; }
+/* Browsers without the popover attribute would show these menus permanently; hide them there. */
+@supports not selector(:popover-open) {
+  .sidebar-popover { display: none; }
+}
 .server-menu-item {
   text-align: left;
   padding: 8px 10px;
@@ -1463,6 +1467,7 @@ button.live-watch:hover, button.live-watch:focus-visible { filter: brightness(1.
   pointer-events: none;
 }
 .tile-label {
+  color: #fff; /* always over the dark gradient, whatever the theme */
   font-size: 13px;
   font-weight: 600;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
