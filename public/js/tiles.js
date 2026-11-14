@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { setWatching, refreshCaptureThrottle } from './peers.js';
+import { stopRemoteWatch } from './sfu.js';
 
 const videosContainer = document.getElementById('videos');
 const tiles = new Map(); // tile key ('local' or socket id) -> tile <div>
@@ -189,6 +190,18 @@ function createTile(isLocal, key) {
       muteBtn.title = 'Mudo';
     };
     actions.appendChild(volumeSlider);
+
+    // A stream from another channel has no room to leave: stopping the watch
+    // is the whole way out (it also closes the connection to that channel).
+    if (state.remoteWatch.has(key)) {
+      const stopBtn = document.createElement('button');
+      stopBtn.className = 'icon-btn';
+      stopBtn.title = 'Parar de assistir';
+      stopBtn.setAttribute('aria-label', 'Parar de assistir');
+      stopBtn.textContent = '✕';
+      stopBtn.onclick = () => stopRemoteWatch(key);
+      actions.appendChild(stopBtn);
+    }
   }
 
   // Your own screen preview is off by default: it's a full-rate decode +
@@ -324,12 +337,14 @@ export function renderTiles() {
     const purpose = purposeOfKey(key);
     // A stream can outlive its peer (late SFU track, in-flight signal after
     // peer-left) or beat the peer's announcement; show it only while the peer
-    // is actually in the room.
-    if (!state.knownPeers.has(peerId)) continue;
-    const name = state.peerUsernames.get(peerId) || 'Alguém';
+    // is actually in the room — or we're deliberately watching it from another
+    // channel (state.remoteWatch).
+    const remote = state.remoteWatch.get(key);
+    if (!remote && !state.knownPeers.has(peerId)) continue;
+    const name = remote?.username || state.peerUsernames.get(peerId) || 'Alguém';
     desired.set(key, {
       stream,
-      label: `${name} — ${PURPOSE_LABEL[purpose] || purpose}`,
+      label: `${name} — ${PURPOSE_LABEL[purpose] || purpose}${remote ? ` · #${remote.channelName}` : ''}`,
       isLocal: false,
     });
   }

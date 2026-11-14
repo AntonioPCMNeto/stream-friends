@@ -1,6 +1,7 @@
 import { state } from './state.js';
 import { stopSharing, stopWebcam, initSegmented } from './share.js';
 import { closeAllPeerConnections } from './peers.js';
+import { startRemoteWatch } from './sfu.js';
 import { refreshParticipants } from './participants.js';
 import { showToast } from './toast.js';
 import { clearChat, setViewingChannel, openPanelIfClosed, showStreams, isChatOpen } from './chat.js';
@@ -730,9 +731,22 @@ function sendWatchServer(channelIds) {
   socket?.emit('watch-server', { channelIds });
 }
 
+// A live occupant of a channel you're not in can be watched from where you
+// are (sfu.js's startRemoteWatch); in your own channel the stream is already in
+// the grid, and from Home there is no grid to put it in.
+function watchFromElsewhere(channelId, channelName, sharerId, username) {
+  if (state.roomId === channelId) return;
+  if (!state.hasEntered) {
+    showToast('Entre em um canal para assistir sem trocar de sala.');
+    return;
+  }
+  startRemoteWatch(channelId, channelName, sharerId, username);
+}
+
 function renderOccupants(el, occupants) {
   el.innerHTML = '';
-  occupants.forEach(({ username, avatar: avatarUrl, screen }) => {
+  const { channelId, channelName } = el.dataset;
+  occupants.forEach(({ id, username, avatar: avatarUrl, screen }) => {
     setAvatarUrl(username, avatarUrl);
     const row = document.createElement('div');
     row.className = 'voice-channel-occupant';
@@ -743,9 +757,16 @@ function renderOccupants(el, occupants) {
     name.textContent = username;
     row.appendChild(name);
     if (screen) {
-      const badge = document.createElement('span');
+      const watchable = Boolean(id) && channelId !== state.roomId;
+      const badge = document.createElement(watchable ? 'button' : 'span');
       badge.className = 'live-badge live-badge-sm';
-      badge.textContent = 'AO VIVO';
+      badge.textContent = watchable ? '▶ Assistir' : 'AO VIVO';
+      if (watchable) {
+        badge.type = 'button';
+        badge.classList.add('live-watch');
+        badge.title = 'Assistir sem sair do seu canal';
+        badge.addEventListener('click', () => watchFromElsewhere(channelId, channelName, id, username));
+      }
       row.appendChild(badge);
     }
     el.appendChild(row);
@@ -870,6 +891,7 @@ function buildVoiceChannelRow(channel) {
   const occupants = document.createElement('div');
   occupants.className = 'voice-channel-occupants';
   occupants.dataset.channelId = channel.id;
+  occupants.dataset.channelName = channel.name;
   renderOccupants(occupants, channelOccupancy.get(channel.id) || []);
   wrap.appendChild(occupants);
 

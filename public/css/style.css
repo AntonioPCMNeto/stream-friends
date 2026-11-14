@@ -983,6 +983,10 @@ body.chat-mode #serverSidebar.hidden ~ main { padding-bottom: 88px; }
   letter-spacing: 0.05em;
 }
 .live-badge-sm { margin-left: 6px; padding: 1px 4px; font-size: 9px; }
+/* A live occupant of another channel: the badge doubles as the button that opens
+   the stream here (sfu.js's startRemoteWatch). */
+button.live-watch { border: none; cursor: pointer; font-family: inherit; }
+button.live-watch:hover, button.live-watch:focus-visible { filter: brightness(1.2); }
 @media (max-width: 520px) {
   .home-card { flex-wrap: wrap; }
   .home-card-actions { width: 100%; }

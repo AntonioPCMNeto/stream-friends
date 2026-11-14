@@ -246,17 +246,35 @@ function isValidChatMessage(text) {
 // token so RLS/auth.uid() decide whether they may post there. Best-effort by
 // design: the message was already broadcast, so a failure (or a guest, or a
 // room that isn't a server channel) only means it won't be in the history.
+function clientAs(accessToken) {
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
 async function persistChatMessage(channelId, text, accessToken) {
   if (!supabase || !isValidAccessToken(accessToken)) return;
   try {
-    const asUser = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const asUser = clientAs(accessToken);
     const { error } = await asUser.rpc('post_message', { target_channel_id: channelId, body: text });
     if (error) console.error('Failed to store chat message:', error.message);
   } catch (err) {
     console.error('Failed to store chat message:', err);
+  }
+}
+
+// Whether this account belongs to the server that owns `channelId`. The
+// `channels` SELECT policy only returns rows of servers the caller is a member
+// of, so a row coming back is the membership check. Any failure means "no".
+async function canAccessChannel(accessToken, channelId) {
+  if (!supabase || !isValidAccessToken(accessToken)) return false;
+  try {
+    const { data, error } = await clientAs(accessToken).from('channels').select('id').eq('id', channelId).limit(1);
+    return !error && Array.isArray(data) && data.length > 0;
+  } catch (err) {
+    console.error('Failed to check channel membership:', err);
+    return false;
   }
 }
 
@@ -287,9 +305,9 @@ function rateLimited(socket, bucket, max, windowMs) {
 function getVoiceOccupants(roomId) {
   const room = rooms.get(roomId);
   if (!room) return [];
-  return Array.from(room.values())
-    .filter((info) => info.sharing.voice || info.sharing.screen)
-    .map((info) => ({ username: info.username, avatar: info.avatar, verified: info.verified, screen: info.sharing.screen }));
+  return Array.from(room.entries())
+    .filter(([, info]) => info.sharing.voice || info.sharing.screen)
+    .map(([id, info]) => ({ id, username: info.username, avatar: info.avatar, verified: info.verified, screen: info.sharing.screen }));
 }
 
 function broadcastVoiceOccupancy(roomId) {
@@ -466,6 +484,32 @@ io.on('connection', (socket) => {
       ack({ enabled: true, url: LIVEKIT_URL, token: await token.toJwt() });
     } catch (err) {
       console.error('[livekit-token] failed, client falls back to mesh:', err.message);
+      ack({ enabled: false });
+    }
+  });
+
+  // A view-only token for a channel the socket is NOT in, so a server member
+  // can watch a stream from wherever they are (see sfu.js's startRemoteWatch).
+  // Only members of the channel's server get one (canAccessChannel), it can't
+  // publish, and its identity is distinct from the socket's own so it never
+  // collides with that socket's connection to its own room.
+  socket.on('livekit-watch-token', async (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    const { channelId, accessToken } = payload && typeof payload === 'object' ? payload : {};
+    if (rateLimited(socket, 'livekit-watch-token', 10, 10000)) return ack({ enabled: false });
+    if (!livekitEnabled || !isValidRoomId(channelId)) return ack({ enabled: false });
+    const token = isValidAccessToken(accessToken) ? accessToken : socket.data.accessToken;
+    if (!(await canAccessChannel(token, channelId))) return ack({ enabled: false, denied: true });
+    try {
+      const jwt = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+        identity: `watch:${socket.id}:${channelId}`,
+        name: socket.data.username,
+        ttl: '1h',
+      });
+      jwt.addGrant({ room: channelId, roomJoin: true, canPublish: false, canSubscribe: true, canPublishData: false });
+      ack({ enabled: true, url: LIVEKIT_URL, token: await jwt.toJwt() });
+    } catch (err) {
+      console.error('[livekit-watch-token] failed:', err.message);
       ack({ enabled: false });
     }
   });

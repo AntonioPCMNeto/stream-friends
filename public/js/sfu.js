@@ -10,6 +10,7 @@ import { state } from './state.js';
 import { renderTiles } from './tiles.js';
 import { showToast } from './toast.js';
 import { reportSfuFailure } from './sfuDiagnostic.js';
+import { getIdentity } from './auth.js';
 
 const LIVEKIT_MODULE = '../vendor/livekit-client.esm.mjs';
 const TOKEN_TIMEOUT_MS = 3000;
@@ -87,7 +88,7 @@ function purposeOfSource(source) {
   return null;
 }
 
-function wireRoom(r) {
+function wireRoom(r, onDisconnected) {
   const { RoomEvent, Track } = lk;
 
   // A subscribed track becomes part of the same per-(peer, purpose) MediaStream
@@ -154,12 +155,14 @@ function wireRoom(r) {
     if (removed) renderTiles();
   });
 
-  r.on(RoomEvent.Disconnected, () => {
-    if (r !== room) return; // we disconnected it ourselves
-    console.error('[sfu] connection to the video server was lost');
-    showToast('Conexão com o servidor de vídeo perdida. Reconectando…', 'error');
-    beginTransport();
-  });
+  r.on(RoomEvent.Disconnected, () => onDisconnected(r));
+}
+
+function onMainRoomDisconnected(r) {
+  if (r !== room) return; // we disconnected it ourselves
+  console.error('[sfu] connection to the video server was lost');
+  showToast('Conexão com o servidor de vídeo perdida. Reconectando…', 'error');
+  beginTransport();
 }
 
 function signalUrls(directUrl) {
@@ -176,7 +179,7 @@ function createRoom() {
     dynacast: true,
     stopLocalTrackOnUnpublish: false,
   });
-  wireRoom(r);
+  wireRoom(r, onMainRoomDisconnected);
   // Fires once the sender exists but before the offer is built, which is the
   // window to steer codec selection towards a hardware-encodable H.264.
   r.localParticipant.on(lk.ParticipantEvent.LocalSenderCreated, (sender, track) => {
@@ -254,6 +257,7 @@ export function beginTransport() {
 }
 
 export function disconnectSfu() {
+  stopAllRemoteWatches();
   generation++;
   const r = room;
   room = null;
@@ -376,9 +380,137 @@ export function setSfuWatching(peerId, purpose, watching) {
 }
 
 function applySubscription(peerId, purpose, watching) {
-  room?.remoteParticipants.get(peerId)?.trackPublications.forEach((pub) => {
-    if (pub.kind === lk.Track.Kind.Video && purposeOfSource(pub.source) === purpose) pub.setSubscribed(watching);
+  [room, ...[...watchRooms.values()].map((entry) => entry.room)].forEach((r) => {
+    r?.remoteParticipants.get(peerId)?.trackPublications.forEach((pub) => {
+      if (pub.kind === lk.Track.Kind.Video && purposeOfSource(pub.source) === purpose) pub.setSubscribed(watching);
+    });
   });
+}
+
+// ---- Watching a stream from another channel ----
+// A second, view-only connection to the sharer's channel (the stream stays
+// published there; our own room is untouched). One LiveKit room per channel,
+// shared by every stream we watch in it, and torn down with the last one.
+// SFU only: a sharer on the mesh fallback publishes nothing there, which the
+// timeout below reports.
+const MAX_REMOTE_WATCHES = 2;
+const WATCH_TIMEOUT_MS = 10000;
+const watchRooms = new Map(); // channelId -> { room, keys:Set<tile key>, ready:Promise }
+
+async function requestWatchToken(channelId) {
+  const identity = await getIdentity().catch(() => null);
+  return new Promise((resolve) => {
+    socket.timeout(TOKEN_TIMEOUT_MS).emit(
+      'livekit-watch-token',
+      { channelId, accessToken: identity?.accessToken },
+      (err, reply) => resolve(err ? null : reply)
+    );
+  });
+}
+
+// autoSubscribe is off for these rooms: the channel may have several sharers
+// and we only want the ones we asked for.
+function subscribeIfWanted(entry, publication, participant) {
+  const purpose = purposeOfSource(publication.source);
+  const key = `${participant.identity}:${purpose}`;
+  if (purpose !== 'screen' || !entry.keys.has(key)) return;
+  if (publication.kind === lk.Track.Kind.Video && unwatched.has(key)) return;
+  publication.setSubscribed(true);
+}
+
+function openWatchRoom(channelId) {
+  const entry = { room: null, keys: new Set(), ready: null };
+  entry.ready = (async () => {
+    const reply = await requestWatchToken(channelId);
+    if (!reply?.enabled) throw new Error(reply?.denied ? 'denied' : 'unavailable');
+    lk = lk || await import(LIVEKIT_MODULE);
+    const { RoomEvent, Track } = lk;
+    const makeRoom = () => {
+      const r = new lk.Room({ adaptiveStream: false });
+      wireRoom(r, (closed) => {
+        if (watchRooms.get(channelId)?.room !== closed) return; // we closed it ourselves
+        showToast('Conexão com a transmissão perdida.', 'error');
+        [...entry.keys].forEach(stopRemoteWatch);
+      });
+      r.on(RoomEvent.TrackPublished, (pub, participant) => subscribeIfWanted(entry, pub, participant));
+      // The sharer stopping (or leaving) ends the watch, tile and connection.
+      r.on(RoomEvent.TrackUnpublished, (pub, participant) => {
+        if (pub.kind === Track.Kind.Video && purposeOfSource(pub.source) === 'screen') stopRemoteWatch(`${participant.identity}:screen`);
+      });
+      r.on(RoomEvent.ParticipantDisconnected, (participant) => stopRemoteWatch(`${participant.identity}:screen`));
+      return r;
+    };
+    // Same proxy-first order as the main connection (see signalUrls).
+    let connected = null;
+    for (const url of signalUrls(reply.url)) {
+      const attempt = makeRoom();
+      try {
+        await attempt.connect(url, reply.token, { autoSubscribe: false });
+        connected = attempt;
+        break;
+      } catch {
+        attempt.disconnect();
+      }
+    }
+    if (!connected) throw new Error('unavailable');
+    entry.room = connected;
+    return connected;
+  })();
+  entry.ready.catch(() => { if (watchRooms.get(channelId) === entry) watchRooms.delete(channelId); });
+  watchRooms.set(channelId, entry);
+  return entry;
+}
+
+export async function startRemoteWatch(channelId, channelName, sharerId, username) {
+  const key = `${sharerId}:screen`;
+  if (state.remoteWatch.has(key)) return;
+  if (state.remoteWatch.size >= MAX_REMOTE_WATCHES) {
+    showToast(`Você já está assistindo ${MAX_REMOTE_WATCHES} transmissões de outros canais.`, 'error');
+    return;
+  }
+  state.remoteWatch.set(key, { channelId, channelName, username });
+  const entry = watchRooms.get(channelId) || openWatchRoom(channelId);
+  entry.keys.add(key);
+
+  try {
+    await entry.ready;
+  } catch (err) {
+    stopRemoteWatch(key);
+    showToast(err.message === 'denied'
+      ? 'Você não tem acesso a esse canal.'
+      : 'Não foi possível abrir a transmissão (servidor de vídeo indisponível).', 'error');
+    return;
+  }
+  if (!entry.keys.has(key)) return; // stopped while connecting
+  const sharer = entry.room.remoteParticipants.get(sharerId);
+  sharer?.trackPublications.forEach((pub) => subscribeIfWanted(entry, pub, sharer));
+
+  setTimeout(() => {
+    if (!state.remoteWatch.has(key) || state.streams.has(key)) return;
+    stopRemoteWatch(key);
+    showToast('Transmissão indisponível fora do canal. Entre no canal para assistir.', 'error');
+  }, WATCH_TIMEOUT_MS);
+}
+
+export function stopRemoteWatch(key) {
+  const info = state.remoteWatch.get(key);
+  if (!info) return;
+  state.remoteWatch.delete(key);
+  unwatched.delete(key);
+  const entry = watchRooms.get(info.channelId);
+  if (entry) {
+    entry.keys.delete(key);
+    if (!entry.keys.size) {
+      watchRooms.delete(info.channelId);
+      entry.ready.then((r) => r.disconnect(), () => {});
+    }
+  }
+  state.streams.delete(key);
+  renderTiles();
+}
+
+function stopAllRemoteWatches() {
+  [...state.remoteWatch.keys()].forEach(stopRemoteWatch);
 }
 
 // Hides asked for while the join was still connecting apply to publications
