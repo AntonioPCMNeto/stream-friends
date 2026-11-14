@@ -1497,6 +1497,8 @@ body.chat-mode #serverSidebar.hidden ~ main { padding-bottom: 88px; }
 .picker-tab:hover { color: var(--text); border-color: var(--accent); }
 .picker-tab.active { background: var(--accent); border-color: var(--accent); color: white; }
 
+.picker-hint { margin: 0; font-size: 12px; color: var(--text-dim); }
+
 .picker-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));

@@ -14,6 +14,19 @@ let selectedIsScreen = false;
 let audioMode = 'system';
 let onKeyDown = null;
 
+// Which tab opens first. A window capture only copies that window's pixels,
+// where a screen capture copies the whole display (every monitor's worth of
+// GPU work, for a game on one), so Janelas is the default and the last tab the
+// user chose is remembered — an exclusive-fullscreen game can capture black as
+// a window, and picking Telas once should stick.
+const TAB_STORAGE_KEY = 'scrimaAi.pickerTab';
+function loadTab() {
+  try { return localStorage.getItem(TAB_STORAGE_KEY); } catch { return null; }
+}
+function saveTab(tab) {
+  try { localStorage.setItem(TAB_STORAGE_KEY, tab); } catch { /* the choice just isn't remembered */ }
+}
+
 // Set for the lifetime of one picker; called exactly once with the result.
 let resolvePick = null;
 
@@ -97,6 +110,10 @@ function showPicker(sources) {
   grid.className = 'picker-grid';
   card.appendChild(grid);
 
+  const hint = document.createElement('p');
+  hint.className = 'picker-hint';
+  card.appendChild(hint);
+
   const footer = document.createElement('div');
   footer.className = 'picker-footer';
 
@@ -156,26 +173,23 @@ function showPicker(sources) {
     list.forEach((source) => grid.appendChild(buildSourceButton(source, confirmBtn)));
   }
 
-  const screenTab = buildTabButton(`Telas (${screens.length})`, () => {
-    screenTab.classList.add('active');
-    windowTab.classList.remove('active');
-    renderGrid(screens);
-  });
-  const windowTab = buildTabButton(`Janelas (${windows.length})`, () => {
-    windowTab.classList.add('active');
-    screenTab.classList.remove('active');
-    renderGrid(windows);
-  });
+  const showTab = (tab) => {
+    const isWindows = tab === 'windows';
+    windowTab.classList.toggle('active', isWindows);
+    screenTab.classList.toggle('active', !isWindows);
+    hint.textContent = isWindows
+      ? 'Janela: captura só o conteúdo dela, o que pesa menos na GPU. Um jogo em tela cheia exclusiva pode aparecer preto — nesse caso use Telas.'
+      : 'Tela: captura o monitor inteiro, incluindo tudo que estiver nele.';
+    renderGrid(isWindows ? windows : screens);
+  };
+  const screenTab = buildTabButton(`Telas (${screens.length})`, () => { saveTab('screens'); showTab('screens'); });
+  const windowTab = buildTabButton(`Janelas (${windows.length})`, () => { saveTab('windows'); showTab('windows'); });
   tabs.appendChild(screenTab);
   tabs.appendChild(windowTab);
 
-  if (screens.length) {
-    screenTab.classList.add('active');
-    renderGrid(screens);
-  } else {
-    windowTab.classList.add('active');
-    renderGrid(windows);
-  }
+  const saved = loadTab();
+  const wantWindows = saved === 'screens' ? !screens.length : (windows.length > 0 || !screens.length);
+  showTab(wantWindows ? 'windows' : 'screens');
 
   overlay.appendChild(card);
   document.body.appendChild(overlay);

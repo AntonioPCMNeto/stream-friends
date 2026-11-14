@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, session, desktopCapturer, ipcMain, globalShortcut } = require('electron');
+const { app, BrowserWindow, Menu, Tray, session, desktopCapturer, ipcMain, globalShortcut, nativeImage } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const os = require('os');
@@ -219,6 +219,13 @@ function registerDesktopIpc() {
   });
 
   ipcMain.handle('desktop:show-window', () => showWindow());
+  ipcMain.handle('desktop:set-unread', (_event, count, iconDataUrl) => applyUnread(count, iconDataUrl));
+  ipcMain.handle('deeplink:take', () => {
+    inviteListenerReady = true;
+    const id = pendingInvite;
+    pendingInvite = null;
+    return id;
+  });
 
   ipcMain.handle('desktop:get-prefs', () => ({
     closeToTray: prefs.closeToTray,
@@ -241,6 +248,42 @@ function registerDesktopIpc() {
   });
 
   app.on('will-quit', () => globalShortcut.unregisterAll());
+}
+
+// scrima://invite/<serverId> — opens the app and accepts the server invite.
+// Windows hands the URL to a cold start in argv and to a running instance via
+// `second-instance`; either way the renderer gets only the validated id. A
+// cold start's link waits in `pendingInvite` until the page asks for it.
+const DEEP_LINK = /^scrima:\/\/invite\/([A-Za-z0-9_-]{1,100})\/?$/i;
+let pendingInvite = null;
+let inviteListenerReady = false;
+
+function inviteFromArgv(argv) {
+  for (const arg of argv) {
+    const match = DEEP_LINK.exec(arg);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+function handleInviteLink(serverId) {
+  if (!serverId) return;
+  if (inviteListenerReady) mainWindow?.webContents.send('deeplink:invite', serverId);
+  else pendingInvite = serverId;
+  showWindow();
+}
+
+// Messages that arrived while the window wasn't being looked at. The renderer
+// owns the count (it resets on focus) and draws the overlay icon on a canvas;
+// this only applies it to the taskbar button and the tray tooltip.
+const TRAY_TOOLTIP = 'Scrima aí';
+function applyUnread(count, iconDataUrl) {
+  const n = Number.isInteger(count) && count > 0 ? Math.min(count, 999) : 0;
+  const valid = typeof iconDataUrl === 'string' && iconDataUrl.length < 20000 && iconDataUrl.startsWith('data:image/png;base64,');
+  mainWindow?.setOverlayIcon(n && valid ? nativeImage.createFromDataURL(iconDataUrl) : null, n ? `${n} não lidas` : '');
+  if (n && !mainWindow?.isFocused()) mainWindow?.flashFrame(true);
+  else mainWindow?.flashFrame(false);
+  tray?.setToolTip(n ? `${TRAY_TOOLTIP} — ${n} ${n === 1 ? 'mensagem não lida' : 'mensagens não lidas'}` : TRAY_TOOLTIP);
 }
 
 function sendVoiceCommand(command) {
@@ -322,11 +365,18 @@ function initUpdater() {
 // otherwise start a second copy fighting over the mic; focus the first instead.
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
-app.on('second-instance', showWindow);
+app.on('second-instance', (_event, argv) => {
+  const serverId = inviteFromArgv(argv);
+  if (serverId) handleInviteLink(serverId);
+  else showWindow();
+});
 
 app.whenReady().then(() => {
   if (!gotLock) return;
   loadPrefs();
+  // The dev electron.exe must not become the system handler for scrima://.
+  if (app.isPackaged) app.setAsDefaultProtocolClient('scrima');
+  pendingInvite = inviteFromArgv(process.argv);
   registerDesktopIpc();
   createWindow();
   createTray();

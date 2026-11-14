@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld('hotkeys', {
 // Desktop-only preferences and window helpers for the settings page.
 contextBridge.exposeInMainWorld('desktop', {
   showWindow: () => ipcRenderer.invoke('desktop:show-window'),
+  // Unread count for the taskbar overlay/flash and tray tooltip; the icon is a
+  // small PNG data URL drawn by the page. 0 clears it.
+  setUnread: (count, iconDataUrl) => ipcRenderer.invoke('desktop:set-unread', count, iconDataUrl),
   getPrefs: () => ipcRenderer.invoke('desktop:get-prefs'),
   setPrefs: (patch) => ipcRenderer.invoke('desktop:set-prefs', patch),
   setZoom: (percent) => {
@@ -48,5 +51,15 @@ contextBridge.exposeInMainWorld('updater', {
   version: () => ipcRenderer.invoke('updater:version'),
   onStatus: (callback) => {
     ipcRenderer.on('updater:status', (_event, payload) => callback(payload));
+  },
+});
+
+// scrima://invite/<id> links — see handleInviteLink() in main.js. `take`
+// returns the id of a link that launched the app (once), `onInvite` fires for
+// links opened while it's already running.
+contextBridge.exposeInMainWorld('deepLinks', {
+  take: () => ipcRenderer.invoke('deeplink:take'),
+  onInvite: (callback) => {
+    ipcRenderer.on('deeplink:invite', (_event, serverId) => callback(serverId));
   },
 });

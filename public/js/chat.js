@@ -243,12 +243,41 @@ function notifyMessage(username, text) {
   } catch { /* best-effort only */ }
 }
 
+// Desktop only: messages that arrive while the window isn't being looked at
+// feed the taskbar overlay, flash and tray tooltip (main.js's applyUnread).
+// Reset as soon as the window is focused again.
+let missedCount = 0;
+
+function unreadIcon(count) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 32;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#e5484d';
+  ctx.beginPath();
+  ctx.arc(16, 16, 16, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(count > 9 ? '9+' : String(count), 16, 17);
+  return canvas.toDataURL('image/png');
+}
+
+function reportMissed(count) {
+  missedCount = count;
+  window.desktop?.setUnread(count, count ? unreadIcon(count) : null);
+}
+
 export function initChat(theSocket) {
   socket = theSocket;
+
+  window.addEventListener('focus', () => { if (missedCount) reportMissed(0); });
 
   socket.on('chat-message', ({ channelId, username, avatar, text, ts }) => {
     setAvatarUrl(username, avatar);
     notifyMessage(username, text);
+    if (window.desktop && username !== state.myUsername && (!document.hasFocus() || document.hidden)) reportMissed(missedCount + 1);
     if (channelId !== viewingChannelId) return; // e.g. your own room's chat arriving while you're peeking elsewhere
     if (pendingLive) pendingLive.push({ username, text, ts });
     else appendMessage(username, text, ts);
