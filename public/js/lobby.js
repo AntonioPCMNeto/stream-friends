@@ -1054,6 +1054,7 @@ function joinRoom(roomId, displayLabel = roomId) {
 
   lobby.style.display = 'none';
   appScreen.style.display = '';
+  document.body.classList.add('in-room');
   memberList.classList.remove('hidden');
 
   if (isSwitch) {
@@ -1106,6 +1107,7 @@ function leaveRoom() {
   window.history.replaceState({}, '', url);
 
   appScreen.style.display = 'none';
+  document.body.classList.remove('in-room');
   memberList.classList.add('hidden');
   lobby.style.display = '';
   lobbyError.textContent = '';
@@ -1139,6 +1141,14 @@ export async function initLobby(theSocket) {
   socket = theSocket;
 
   initSegmented(createChannelTypeGroup);
+  // The "+" next to each channel section opens the shared create popover
+  // preset to that section's type.
+  document.querySelectorAll('[data-new-channel]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      createChannelTypeGroup.querySelector(`button[data-value="${btn.dataset.newChannel}"]`).click();
+      createChannelError.textContent = '';
+    });
+  });
 
   enterBtn.addEventListener('click', enterRoom);
   usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
@@ -1300,6 +1310,7 @@ export async function initLobby(theSocket) {
       if (error) { createChannelError.textContent = error; return; }
 
       createChannelNameInput.value = '';
+      document.getElementById('createChannelPopover').hidePopover();
       refreshChannels();
     } finally {
       createChannelBtn.disabled = false;
@@ -1311,16 +1322,16 @@ export async function initLobby(theSocket) {
 
   copyLinkBtn.addEventListener('click', async () => {
     await navigator.clipboard.writeText(state.currentRoomUrl);
-    const original = copyLinkBtn.textContent;
+    const original = copyLinkBtn.innerHTML;
     copyLinkBtn.textContent = '✅ Copiado!';
-    setTimeout(() => { copyLinkBtn.textContent = original; }, 1500);
+    setTimeout(() => { copyLinkBtn.innerHTML = original; }, 1500);
   });
 
   copyRoomCodeBtn.addEventListener('click', async () => {
     await navigator.clipboard.writeText(state.roomId);
-    const original = copyRoomCodeBtn.textContent;
+    const original = copyRoomCodeBtn.innerHTML;
     copyRoomCodeBtn.textContent = '✅';
-    setTimeout(() => { copyRoomCodeBtn.textContent = original; }, 1200);
+    setTimeout(() => { copyRoomCodeBtn.innerHTML = original; }, 1200);
   });
 
   let hasConnectedBefore = false;

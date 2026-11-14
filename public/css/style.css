@@ -10,6 +10,7 @@
   --danger: #ff6b6b;
   --speaking: #3ba55d;
   --radius: 8px;
+  --pane: color-mix(in srgb, var(--surface) 55%, var(--bg));
 }
 
 * { box-sizing: border-box; }
@@ -63,6 +64,11 @@ body {
 }
 .sidebar-toggle-btn:hover { color: var(--text); border-color: var(--accent); }
 
+/* ---- App shell ----
+   Signed-in accounts (body.has-sidebar) and anyone inside a room (body.in-room,
+   set in lobby.js) get the Discord layout: one viewport-tall row of flush
+   panes — server rail | channel sidebar | content | members — each scrolling
+   on its own. The signed-out lobby stays a normal centered page. */
 #appShell {
   display: flex;
   align-items: flex-start;
@@ -74,21 +80,24 @@ main {
   padding: 0 20px 60px;
 }
 
-/* The lobby card is centered in <main>, which sits right of the server rail
-   + sidebar (76px + 276px), so it looked off-center against the window and
-   the header. Reserve the same footprint on its right so it centers on the
-   viewport, shrinking to whatever still fits the 640px signed-in card. The lobby is hidden
-   with the .hidden class on desktop but an inline display:none on the web
-   build, so both have to count as "not showing" or the padding leaks into
-   the room. */
-#appShell:has(.server-rail:not(.hidden)) main:has(#lobby:not(.hidden):not([style*="display: none"])) {
-  padding-right: clamp(0px, calc(100vw - 1012px), 372px);
+body:is(.has-sidebar, .in-room) {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--pane);
 }
-@media (max-width: 880px) {
-  #appShell:has(.server-rail:not(.hidden)) main:has(#lobby:not(.hidden):not([style*="display: none"])) {
-    padding-right: clamp(0px, calc(100vw - 736px), 96px);
-  }
-}
+body:is(.has-sidebar, .in-room) .app-header { display: none; }
+body:is(.has-sidebar, .in-room) #appShell { flex: 1; min-height: 0; align-items: stretch; }
+body:is(.has-sidebar, .in-room) main { padding: 0; overflow-y: auto; }
+body.in-room main { display: flex; flex-direction: column; overflow: hidden; }
+body.in-room #appScreen { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* The credit lives at the bottom of the sidebar for accounts; guests (no
+   sidebar) keep it as a slim strip. */
+body.has-sidebar .app-footer { display: none; }
+body.in-room:not(.has-sidebar) .app-footer { padding: 6px 16px 8px; }
+.room-content { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 24px; }
 
 .btn {
   height: 38px;
@@ -191,57 +200,73 @@ main {
    next to it; hidden together with it below the mobile breakpoint. */
 .server-rail.hidden { display: none; }
 .server-rail {
-  width: 60px;
+  width: 72px;
   flex-shrink: 0;
-  position: sticky;
-  top: 16px;
-  max-height: calc(100vh - 32px);
   overflow-y: auto;
+  scrollbar-width: none;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  margin: 16px 0 16px 16px;
-  padding: 8px 0;
+  gap: 8px;
+  padding: 12px 0;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
 }
+.server-rail::-webkit-scrollbar { display: none; }
 .server-rail-icon {
-  width: 44px;
-  height: 44px;
+  position: relative;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   border: none;
   padding: 0;
   cursor: pointer;
   flex-shrink: 0;
-  transition: border-radius 0.15s, box-shadow 0.15s;
+  transition: border-radius 0.15s, background 0.15s;
 }
-.server-rail-icon .avatar { width: 44px; height: 44px; font-size: 16px; border-radius: inherit; }
+.server-rail-icon .avatar { width: 48px; height: 48px; font-size: 18px; border-radius: inherit; }
 .server-rail-icon:hover { border-radius: 16px; }
-.server-rail-icon.active { border-radius: 16px; box-shadow: 0 0 0 2px var(--accent); }
+.server-rail-icon.active { border-radius: 16px; }
+/* Discord's left-edge pill: a short stub on hover, tall on the active server. */
+.server-rail-icon::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 4px;
+  height: 0;
+  border-radius: 0 4px 4px 0;
+  background: var(--text);
+  transform: translateY(-50%);
+  transition: height 0.15s;
+}
+.server-rail-icon:hover::before { height: 20px; }
+.server-rail-icon.active::before { height: 40px; }
 .server-rail-add {
   background: var(--surface-2);
   color: var(--speaking);
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.server-rail-add:hover { background: color-mix(in srgb, var(--speaking) 22%, var(--surface-2)); }
+.server-rail-add:hover { background: var(--speaking); color: white; }
 
 .server-rail-home {
   background: var(--surface-2);
   color: var(--text);
-  font-size: 20px;
+  font-size: 22px;
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
 }
-.server-rail-home:hover { background: color-mix(in srgb, var(--accent) 35%, var(--surface-2)); }
+.server-rail-home:hover { background: var(--accent); }
 .server-rail-home.active { background: var(--accent); }
-.server-rail-divider { width: 28px; height: 2px; border-radius: 1px; background: var(--border); flex-shrink: 0; }
+.server-rail-divider { width: 32px; height: 2px; border-radius: 1px; background: var(--border); flex-shrink: 0; }
 
 /* Persistent servers/channels sidebar for signed-in accounts (see
    lobby.js/rooms.js) — a permanent fixture of the app shell (both the
@@ -250,56 +275,145 @@ main {
    + its own scroll, same convention as .member-list. */
 #serverSidebar.hidden { display: none; }
 #serverSidebar {
-  width: 260px;
+  width: 240px;
   flex-shrink: 0;
-  position: sticky;
-  top: 16px;
-  max-height: calc(100vh - 32px);
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin: 16px 0 16px 16px;
-  padding: 20px 16px;
+  border-right: 1px solid var(--border);
+  /* room for the user panel docked over the bottom (see .user-bar-wrap) */
+  padding-bottom: 64px;
 }
+body:has(#voiceConnectedBar:not(.hidden)) #serverSidebar { padding-bottom: 100px; }
+#noServerView { padding: 16px; }
 #noServerView.hidden { display: none; }
+#channelsView { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 #channelsView.hidden { display: none; }
 
+.channels-header {
+  flex-shrink: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-server-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px 0 16px;
+}
+.sidebar-server-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-menu-btn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sidebar-menu-btn:hover, .sidebar-menu-btn:focus-visible { background: var(--surface-2); color: var(--text); }
+.sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 8px 8px; }
+.sidebar-section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 6px 8px;
+  margin-top: 8px;
+}
+.sidebar-section-row:first-child { margin-top: 0; }
 .sidebar-section-label {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--text-dim);
-  margin: 0 0 14px;
-  padding: 0 4px;
-}
-/* Extra breathing room when a second section label (e.g. "Canais de Voz")
-   follows a channel list rather than opening the sidebar. */
-.my-servers-list + .sidebar-section-label { margin-top: 16px; }
-.channels-header { margin-bottom: 14px; }
-.sidebar-server-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.sidebar-leave-link.btn-link {
-  display: inline-block;
-  width: auto;
-  flex-shrink: 0;
   margin: 0;
-  padding: 0 4px;
-  font-size: 12px;
+  padding: 0;
+}
+#noServerView .sidebar-section-label { margin-bottom: 12px; }
+.sidebar-add-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
   color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.sidebar-leave-link.btn-link:hover { color: var(--danger); text-decoration: none; }
-.sidebar-invite-link.btn-link { margin-left: auto; }
-.sidebar-invite-link.btn-link:hover { color: var(--accent-hover); }
-.sidebar-server-name {
-  font-size: 16px;
-  font-weight: 700;
+.sidebar-add-btn:hover, .sidebar-add-btn:focus-visible { color: var(--text); }
+.sidebar-credit {
+  margin: 0;
+  padding: 6px 8px 8px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  opacity: 0.6;
+}
+
+/* Small menus anchored to the sidebar (native popover: light-dismiss and
+   Escape for free). Fixed to the sidebar's known position rather than to the
+   trigger, so there's no anchor-positioning dependency. */
+.sidebar-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 8px;
+  width: 216px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
   color: var(--text);
-  padding: 0 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
+.server-menu { top: 52px; left: 80px; }
+.create-channel-popover { top: 120px; left: 80px; }
+.server-menu:popover-open { display: flex; flex-direction: column; gap: 2px; }
+.create-channel-popover:popover-open { display: block; }
+/* Browsers without the popover attribute would show these menus permanently; hide them there. */
+@supports not selector(:popover-open) {
+  .sidebar-popover { display: none; }
+}
+.server-menu-item {
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.server-menu-item:hover, .server-menu-item:focus-visible { background: var(--accent); color: white; }
+.server-menu-danger { color: var(--danger); }
+.server-menu-danger:hover, .server-menu-danger:focus-visible { background: var(--danger); color: white; }
+.create-channel-popover .create-server-form { margin: 4px 0 0; }
+.create-channel-popover #createChannelTypeGroup { margin: 4px 0 8px; }
+.create-channel-popover .error { margin: 6px 0 0; min-height: 0; }
 
 /* Flat, Discord-style list: no boxy borders — a plain row that only
    distinguishes itself on hover (subtle fill) and when active (tinted
@@ -316,8 +430,7 @@ main {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 10px 7px 13px;
-  border-left: 3px solid transparent;
+  padding: 6px 8px;
   border-radius: 6px;
   cursor: pointer;
   text-align: left;
@@ -330,7 +443,6 @@ main {
 .my-server-row:hover { background: var(--surface-2); color: var(--text); }
 .my-server-row.active {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
-  border-left-color: var(--accent);
   color: var(--text);
   font-weight: 600;
 }
@@ -442,24 +554,33 @@ main {
 
 /* App screen */
 .room-bar {
-  max-width: 1340px;
-  margin: 16px auto 0;
+  flex-shrink: 0;
+  min-height: 48px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: 12px;
   flex-wrap: wrap;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 20px;
+  padding: 0 16px;
+  background: var(--pane);
+  border-bottom: 1px solid var(--border);
 }
 .room-bar-left, .room-bar-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
 }
+.room-bar .room-code-label { display: none; }
+.room-bar .btn { height: 32px; }
+.room-bar .btn-icon { min-width: 32px; padding: 0 6px; }
+.room-bar .btn-primary { padding: 0 14px; font-size: 13px; }
+.room-bar .icon { flex-shrink: 0; }
+.room-bar .copy-code-btn { padding: 4px 6px; }
+.room-bar .copy-code-btn .icon { width: 15px; height: 15px; }
+.room-bar .btn-ghost { background: transparent; border-color: transparent; }
+.room-bar .btn-ghost:hover { background: var(--surface-2); border-color: transparent; }
+#leaveRoomBtn:hover { background: color-mix(in srgb, var(--danger) 22%, transparent); }
 
 .connection-dot {
   width: 9px;
@@ -492,7 +613,7 @@ main {
 }
 .room-code-label.hidden { display: none; }
 .room-code {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text);
   letter-spacing: 0.02em;
@@ -519,8 +640,7 @@ main {
    Copiado!") can still grow instead of clipping. */
 .btn-icon { min-width: 38px; padding: 0 10px; font-size: 16px; }
 
-.bar-group { display: flex; align-items: center; gap: 10px; }
-.bar-divider { width: 1px; height: 26px; background: var(--border); flex-shrink: 0; }
+.bar-group { display: flex; align-items: center; gap: 4px; }
 
 /* Distinct from the other ghost icon buttons — voice is an entry point
    into a whole feature (mic capture, a peer mesh), not a toggle, so it
@@ -693,40 +813,31 @@ main {
 @media (max-width: 420px) {
   .user-bar-wrap { left: 8px; bottom: 8px; }
 }
+/* With the sidebar docked, the user panel is a flush strip across the rail
+   and sidebar (Discord's bottom-left panel) instead of a floating card. */
+@media (min-width: 881px) {
+  body.has-sidebar .user-bar-wrap { left: 0; bottom: 0; width: 312px; max-width: none; }
+  body.has-sidebar .user-bar,
+  body.has-sidebar .voice-connected-bar {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    box-shadow: none;
+  }
+  body.has-sidebar .user-bar { border-bottom: none; padding: 8px 12px; background: color-mix(in srgb, var(--bg) 60%, var(--surface)); }
+  body.has-sidebar .voice-connected-bar { padding: 6px 12px; }
+}
 
-/* Floating launcher (not in normal flow — see index.html) for opening the
-   full-page chat from the streams view; hidden while the chat is open (see
-   openPanel/closePanel in chat.js). */
-.chat-control {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 41;
-}
+/* The chat button lives in the room bar (index.html); chat.js hides the
+   wrapper while the full-page chat is open. */
+.chat-control { position: relative; display: flex; }
 .chat-control.hidden { display: none; }
-#chatToggleBtn {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  border: none;
-  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-  color: white;
-  font-size: 24px;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 8px 28px rgba(99, 102, 241, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
-  transition: transform 0.15s, box-shadow 0.15s;
-}
-#chatToggleBtn:hover { transform: scale(1.06); box-shadow: 0 10px 32px rgba(99, 102, 241, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08) inset; }
-#chatToggleBtn:active { transform: scale(0.96); }
+#chatToggleBtn { position: relative; }
 
 .chat-badge {
   position: absolute;
-  top: -4px;
-  right: -4px;
+  top: -2px;
+  right: -2px;
   min-width: 18px;
   height: 18px;
   padding: 0 4px;
@@ -737,7 +848,7 @@ main {
   font-weight: 700;
   line-height: 18px;
   text-align: center;
-  box-shadow: 0 0 0 2px var(--bg);
+  box-shadow: 0 0 0 2px var(--pane);
 }
 .chat-badge.hidden { display: none; }
 
@@ -750,13 +861,9 @@ main {
   flex: 1;
   min-height: 0;
   width: 100%;
-  max-width: 1340px;
-  margin: 16px auto 0;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--pane);
 }
 .chat-panel.hidden { display: none; }
 .chat-panel-header {
@@ -804,42 +911,13 @@ main {
 }
 .chat-streams-count.hidden { display: none; }
 
-body.chat-mode {
-  height: 100vh;
-  height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-body.chat-mode .app-header { padding: 10px 32px 8px; font-size: 20px; }
-body.chat-mode .app-footer { padding: 6px 32px 8px; }
-body.chat-mode #appShell { flex: 1; min-height: 0; }
-/* The sidebars are sticky with a viewport-based max-height; in this fixed
-   column their share is the shell's height instead. */
-body.chat-mode .server-rail,
-body.chat-mode #serverSidebar,
-body.chat-mode .member-list { max-height: calc(100% - 32px); }
-body.chat-mode main {
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding-bottom: 16px;
-}
-body.chat-mode #appScreen {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-body.chat-mode .room-bar { width: 100%; }
 body.chat-mode .room-content { display: none; }
-/* The fixed bottom-left user bar sits on top of the message box whenever
-   nothing (no sidebar for guests, or the off-canvas breakpoint below) pushes
-   the content to its right, so leave it room. */
-body.chat-mode #serverSidebar.hidden ~ main { padding-bottom: 88px; }
+/* The user bar floats over the bottom-left of the content whenever it isn't
+   docked in the sidebar (guests, and the off-canvas layout below), so leave it
+   room under the chat box / video grid. */
+body.in-room:not(.has-sidebar) #appScreen { padding-bottom: 72px; }
 @media (max-width: 880px) {
-  body.chat-mode main { padding-bottom: 88px; }
+  body.in-room #appScreen { padding-bottom: 72px; }
 }
 .chat-close-btn {
   background: none;
@@ -1126,17 +1204,12 @@ button.live-watch:hover, button.live-watch:focus-visible { filter: brightness(1.
    centered between the two instead of drifting toward one side. */
 .member-list.hidden { display: none; }
 .member-list {
-  width: 260px;
+  width: 240px;
   flex-shrink: 0;
-  position: sticky;
-  top: 16px;
-  max-height: calc(100vh - 32px);
   overflow-y: auto;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin: 16px 16px 16px 0;
-  padding: 20px 16px;
+  border-left: 1px solid var(--border);
+  padding: 16px 12px;
 }
 /* .participants-list's own max-height/scroll (below) is sized for the
    dropdown's limited height — here the outer .member-list already scrolls
@@ -1169,12 +1242,25 @@ button.live-watch:hover, button.live-watch:focus-visible { filter: brightness(1.
 }
 .sidebar-backdrop.hidden { display: none; }
 @media (max-width: 880px) {
+  body.has-sidebar .app-header {
+    display: block;
+    flex-shrink: 0;
+    height: 48px;
+    line-height: 48px;
+    padding: 0 16px 0 68px;
+    font-size: 16px;
+    text-align: left;
+    background-color: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .server-menu, .create-channel-popover { left: 8px; }
   .sidebar-toggle-btn:not(.hidden) { display: inline-flex; align-items: center; justify-content: center; }
   /* The rail is now the only way to switch servers (see index.html), so it
      stays put even here — only the wider channel list becomes an off-canvas
      drawer, and it overlays the rail (higher z-index, same left edge) when
      open rather than needing to hide it first. */
   #serverSidebar:not(.hidden) {
+    padding-bottom: 0;
     position: fixed;
     left: 0;
     top: 0;
@@ -1371,6 +1457,7 @@ button.live-watch:hover, button.live-watch:focus-visible { filter: brightness(1.
   pointer-events: none;
 }
 .tile-label {
+  color: #fff; /* always over the dark gradient, whatever the theme */
   font-size: 13px;
   font-weight: 600;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);

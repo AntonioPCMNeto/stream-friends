@@ -34,27 +34,42 @@
         <div class="channels-header">
           <div class="sidebar-server-row">
             <div id="selectedServerName" class="sidebar-server-name"></div>
-            <button id="inviteServerBtn" type="button" class="btn-link sidebar-leave-link sidebar-invite-link" title="Copiar link de convite do servidor">Convidar</button>
-            <button id="leaveServerBtn" type="button" class="btn-link sidebar-leave-link" title="Sair do servidor">Sair</button>
+            <button type="button" class="sidebar-menu-btn" popovertarget="serverMenu" aria-label="Opções do servidor" title="Opções do servidor"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+          </div>
+          <div id="serverMenu" popover class="sidebar-popover server-menu">
+            <button id="inviteServerBtn" type="button" class="server-menu-item" popovertarget="serverMenu" popovertargetaction="hide" title="Copiar link de convite do servidor">Convidar pessoas</button>
+            <button id="leaveServerBtn" type="button" class="server-menu-item server-menu-danger" popovertarget="serverMenu" popovertargetaction="hide" title="Sair do servidor">Sair do servidor</button>
           </div>
         </div>
 
-        <div class="sidebar-section-label">Canais de Texto</div>
-        <div id="textChannelsList" class="my-servers-list"></div>
+        <div class="sidebar-scroll">
+          <div class="sidebar-section-row">
+            <div class="sidebar-section-label">Canais de Texto</div>
+            <button type="button" class="sidebar-add-btn" data-new-channel="text" popovertarget="createChannelPopover" aria-label="Criar canal de texto" title="Criar canal de texto">+</button>
+          </div>
+          <div id="textChannelsList" class="my-servers-list"></div>
 
-        <div class="sidebar-section-label">Canais de Voz</div>
-        <div id="voiceChannelsList" class="my-servers-list"></div>
+          <div class="sidebar-section-row">
+            <div class="sidebar-section-label">Canais de Voz</div>
+            <button type="button" class="sidebar-add-btn" data-new-channel="voice" popovertarget="createChannelPopover" aria-label="Criar canal de voz" title="Criar canal de voz">+</button>
+          </div>
+          <div id="voiceChannelsList" class="my-servers-list"></div>
+        </div>
 
-        <div id="createChannelTypeGroup" class="segmented" data-value="text" role="group" aria-label="Tipo de canal">
-          <button type="button" data-value="text" class="active" aria-pressed="true"># Texto</button>
-          <button type="button" data-value="voice" aria-pressed="false">🔊 Voz</button>
+        <div id="createChannelPopover" popover class="sidebar-popover create-channel-popover">
+          <div class="field-label">Criar canal</div>
+          <div id="createChannelTypeGroup" class="segmented" data-value="text" role="group" aria-label="Tipo de canal">
+            <button type="button" data-value="text" class="active" aria-pressed="true"># Texto</button>
+            <button type="button" data-value="voice" aria-pressed="false">🔊 Voz</button>
+          </div>
+          <div class="create-server-form">
+            <input id="createChannelNameInput" type="text" placeholder="Nome do novo canal" maxlength="40" autofocus>
+            <button id="createChannelBtn" class="btn btn-primary btn-small">Criar</button>
+          </div>
+          <p id="createChannelError" class="error"></p>
         </div>
-        <div class="create-server-form">
-          <input id="createChannelNameInput" type="text" placeholder="Nome do novo canal" maxlength="40">
-          <button id="createChannelBtn" class="btn btn-ghost btn-small">+ Criar</button>
-        </div>
-        <p id="createChannelError" class="error"></p>
       </div>
+      <p class="sidebar-credit">Em homenagem ao meu amigo Lucas Demétrio</p>
     </aside>
     <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
 
@@ -385,21 +400,19 @@
           <span class="room-code-wrap">
             <span id="roomCodeLabel" class="room-code-label">Sala</span>
             <span id="roomCodeDisplay" class="room-code"></span>
-            <button id="copyRoomCodeBtn" class="copy-code-btn" title="Copiar código da sala" aria-label="Copiar código da sala">📋</button>
+            <button id="copyRoomCodeBtn" class="copy-code-btn" title="Copiar código da sala" aria-label="Copiar código da sala"><svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
           </span>
         </div>
 
         <div class="room-bar-right">
           <div class="bar-group">
-            <button id="startWebcamBtn" class="btn btn-ghost btn-icon" title="Compartilhar Webcam" aria-label="Compartilhar Webcam">📷</button>
-            <button id="switchCameraBtn" class="btn btn-ghost btn-icon hidden" title="Trocar câmera" aria-label="Trocar câmera">🔄</button>
+            <button id="startWebcamBtn" class="btn btn-ghost btn-icon" title="Compartilhar Webcam" aria-label="Compartilhar Webcam"><svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></button>
+            <button id="switchCameraBtn" class="btn btn-ghost btn-icon hidden" title="Trocar câmera" aria-label="Trocar câmera"><svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
           </div>
-
-          <span class="bar-divider"></span>
 
           <div class="bar-group">
             <div class="participants-control">
-              <button id="participantsBtn" class="btn btn-ghost btn-icon" title="Participantes" aria-label="Participantes">👥 <span id="participantsCount">0</span></button>
+              <button id="participantsBtn" class="btn btn-ghost btn-icon" title="Participantes" aria-label="Participantes"><svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> <span id="participantsCount">0</span></button>
 
               <div id="participantsPanel" class="participants-panel hidden">
                 <div class="field-label">Participantes</div>
@@ -407,10 +420,14 @@
               </div>
             </div>
 
-            <button id="copyLinkBtn" class="btn btn-ghost btn-icon" title="Copiar link" aria-label="Copiar link">🔗</button>
+            <button id="copyLinkBtn" class="btn btn-ghost btn-icon" title="Copiar link" aria-label="Copiar link"><svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+            <div class="chat-control">
+              <button id="chatToggleBtn" class="btn btn-ghost btn-icon" title="Chat" aria-label="Chat">
+                <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span id="chatBadge" class="chat-badge hidden">0</span>
+              </button>
+            </div>
           </div>
-
-          <span class="bar-divider"></span>
 
           <div class="bar-group">
             <div class="share-control">
@@ -452,7 +469,7 @@
             </div>
             </div>
 
-            <button id="leaveRoomBtn" class="btn btn-ghost btn-icon" title="Sair da Sala" aria-label="Sair da Sala">🚪</button>
+            <button id="leaveRoomBtn" class="btn btn-ghost btn-icon" title="Sair da Sala" aria-label="Sair da Sala"><svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
           </div>
         </div>
       </div>
@@ -511,17 +528,6 @@
 
       <div class="room-content">
         <div id="videos" class="video-grid"></div>
-      </div>
-
-      <!-- Floating launcher, not part of the room bar — chat is a separate,
-           always-reachable corner of the screen rather than one more item
-           competing for space in the toolbar. Hidden while the panel itself
-           is open (chat.js toggles the wrapper's .hidden class). -->
-      <div class="chat-control">
-        <button id="chatToggleBtn" aria-label="Chat">
-          💬
-          <span id="chatBadge" class="chat-badge hidden">0</span>
-        </button>
       </div>
 
       <!-- Discord-style text channel view: while open (chat.js adds
