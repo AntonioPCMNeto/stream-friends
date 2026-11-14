@@ -37,6 +37,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "win-process-loopback.ps1",
       "public/**/*"
     ],
     "artifactName": "${name}-setup-${version}.${ext}",

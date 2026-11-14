@@ -241,7 +241,7 @@ export function setWatching(peerId, purpose, watching) {
   // The sharer may be on either transport (see startOutgoing): a mesh sharer
   // hears it over the socket, and the SFU keeps the intent for its publication
   // (including while the join is still connecting).
-  if (transportMode() !== 'mesh') setSfuWatching(peerId, purpose, watching);
+  if (transportMode() !== 'mesh' || state.remoteWatch.has(`${peerId}:${purpose}`)) setSfuWatching(peerId, purpose, watching);
   socket.emit('watch-status', { to: peerId, purpose, watching });
 }
 

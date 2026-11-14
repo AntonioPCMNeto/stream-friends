@@ -29,4 +29,8 @@ export const state = {
   // tile key (`${peerId}:${purpose}`, 'local' streams excluded — see
   // state.screenStream/webcamStream) -> inbound MediaStream
   streams: new Map(),
+  // Streams being watched from a channel other than the one we're in (see
+  // sfu.js's startRemoteWatch): tile key -> { channelId, channelName, username }.
+  // Their peers aren't in knownPeers, so tiles.js lets these keys through.
+  remoteWatch: new Map(),
 };

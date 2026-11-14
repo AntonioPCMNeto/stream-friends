@@ -128,7 +128,7 @@ function showPicker(sources) {
   audioFieldLabel.textContent = 'Áudio';
   const audioSelect = document.createElement('select');
   audioSelect.className = 'picker-audio-select';
-  audioSelect.appendChild(new Option('Áudio do sistema (saída padrão do Windows)', 'system'));
+  audioSelect.appendChild(new Option('Áudio do sistema (sem o Discord)', 'system'));
   audioSelect.appendChild(new Option('Sem áudio', 'none'));
   audioSelect.value = audioMode;
   audioSelect.addEventListener('change', () => { audioMode = audioSelect.value; });

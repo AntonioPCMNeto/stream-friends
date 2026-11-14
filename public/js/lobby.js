@@ -1,6 +1,7 @@
 import { state } from './state.js';
 import { stopSharing, stopWebcam, initSegmented } from './share.js';
 import { closeAllPeerConnections } from './peers.js';
+import { startRemoteWatch } from './sfu.js';
 import { refreshParticipants } from './participants.js';
 import { showToast } from './toast.js';
 import { clearChat, setViewingChannel, openPanelIfClosed, showStreams, isChatOpen } from './chat.js';
@@ -730,9 +731,22 @@ function sendWatchServer(channelIds) {
   socket?.emit('watch-server', { channelIds });
 }
 
+// A live occupant of a channel you're not in can be watched from where you
+// are (sfu.js's startRemoteWatch); in your own channel the stream is already in
+// the grid, and from Home there is no grid to put it in.
+function watchFromElsewhere(channelId, channelName, sharerId, username) {
+  if (state.roomId === channelId) return;
+  if (!state.hasEntered) {
+    showToast('Entre em um canal para assistir sem trocar de sala.');
+    return;
+  }
+  startRemoteWatch(channelId, channelName, sharerId, username);
+}
+
 function renderOccupants(el, occupants) {
   el.innerHTML = '';
-  occupants.forEach(({ username, avatar: avatarUrl, screen }) => {
+  const { channelId, channelName } = el.dataset;
+  occupants.forEach(({ id, username, avatar: avatarUrl, screen }) => {
     setAvatarUrl(username, avatarUrl);
     const row = document.createElement('div');
     row.className = 'voice-channel-occupant';
@@ -743,9 +757,16 @@ function renderOccupants(el, occupants) {
     name.textContent = username;
     row.appendChild(name);
     if (screen) {
-      const badge = document.createElement('span');
+      const watchable = Boolean(id) && channelId !== state.roomId;
+      const badge = document.createElement(watchable ? 'button' : 'span');
       badge.className = 'live-badge live-badge-sm';
-      badge.textContent = 'AO VIVO';
+      badge.textContent = watchable ? '▶ Assistir' : 'AO VIVO';
+      if (watchable) {
+        badge.type = 'button';
+        badge.classList.add('live-watch');
+        badge.title = 'Assistir sem sair do seu canal';
+        badge.addEventListener('click', () => watchFromElsewhere(channelId, channelName, id, username));
+      }
       row.appendChild(badge);
     }
     el.appendChild(row);
@@ -870,6 +891,7 @@ function buildVoiceChannelRow(channel) {
   const occupants = document.createElement('div');
   occupants.className = 'voice-channel-occupants';
   occupants.dataset.channelId = channel.id;
+  occupants.dataset.channelName = channel.name;
   renderOccupants(occupants, channelOccupancy.get(channel.id) || []);
   wrap.appendChild(occupants);
 
@@ -1032,6 +1054,7 @@ function joinRoom(roomId, displayLabel = roomId) {
 
   lobby.classList.add('hidden');
   appScreen.classList.remove('hidden');
+  document.body.classList.add('in-room');
   memberList.classList.remove('hidden');
 
   if (isSwitch) {
@@ -1084,6 +1107,7 @@ function leaveRoom() {
   window.history.replaceState({}, '', url);
 
   appScreen.classList.add('hidden');
+  document.body.classList.remove('in-room');
   memberList.classList.add('hidden');
   lobby.classList.remove('hidden');
   lobbyError.textContent = '';
@@ -1117,6 +1141,14 @@ export async function initLobby(theSocket) {
   socket = theSocket;
 
   initSegmented(createChannelTypeGroup);
+  // The "+" next to each channel section opens the shared create popover
+  // preset to that section's type.
+  document.querySelectorAll('[data-new-channel]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      createChannelTypeGroup.querySelector(`button[data-value="${btn.dataset.newChannel}"]`).click();
+      createChannelError.textContent = '';
+    });
+  });
 
   enterBtn.addEventListener('click', enterRoom);
   usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterRoom(); });
@@ -1278,6 +1310,7 @@ export async function initLobby(theSocket) {
       if (error) { createChannelError.textContent = error; return; }
 
       createChannelNameInput.value = '';
+      document.getElementById('createChannelPopover').hidePopover();
       refreshChannels();
     } finally {
       createChannelBtn.disabled = false;
@@ -1289,16 +1322,16 @@ export async function initLobby(theSocket) {
 
   copyLinkBtn.addEventListener('click', async () => {
     await navigator.clipboard.writeText(state.currentRoomUrl);
-    const original = copyLinkBtn.textContent;
+    const original = copyLinkBtn.innerHTML;
     copyLinkBtn.textContent = '✅ Copiado!';
-    setTimeout(() => { copyLinkBtn.textContent = original; }, 1500);
+    setTimeout(() => { copyLinkBtn.innerHTML = original; }, 1500);
   });
 
   copyRoomCodeBtn.addEventListener('click', async () => {
     await navigator.clipboard.writeText(state.roomId);
-    const original = copyRoomCodeBtn.textContent;
+    const original = copyRoomCodeBtn.innerHTML;
     copyRoomCodeBtn.textContent = '✅';
-    setTimeout(() => { copyRoomCodeBtn.textContent = original; }, 1200);
+    setTimeout(() => { copyRoomCodeBtn.innerHTML = original; }, 1200);
   });
 
   let hasConnectedBefore = false;

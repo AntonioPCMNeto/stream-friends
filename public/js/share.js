@@ -4,6 +4,7 @@ import { startOutgoing, updateEncodingParams, announceSharingStatus, removeOutgo
 import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 import { pickSource } from './screenPicker.js';
+import { startAppAudio, stopAppAudio } from './appAudio.js';
 
 const startBtn = document.getElementById('startShareBtn');
 const switchBtn = document.getElementById('switchSourceBtn');
@@ -60,8 +61,11 @@ function setScreenShareUI(sharing) {
   switchBtn.classList.toggle('hidden', !sharing);
 }
 
+const webcamIdleHtml = webcamBtn.innerHTML;
+
 function setWebcamUI(sharing) {
-  webcamBtn.textContent = sharing ? '⏹' : '📷';
+  if (sharing) webcamBtn.textContent = '⏹';
+  else webcamBtn.innerHTML = webcamIdleHtml;
   webcamBtn.title = sharing ? 'Parar Webcam' : 'Compartilhar Webcam';
   webcamBtn.setAttribute('aria-label', webcamBtn.title);
   webcamBtn.classList.toggle('btn-danger', sharing);
@@ -99,6 +103,7 @@ export function stopSharing() {
   }
   state.isSharingScreen = false;
   state.screenStream = null;
+  stopAppAudio();
   renderTiles();
   setScreenShareUI(false);
   if (wasSharing) {
@@ -188,6 +193,19 @@ async function captureDisplay() {
     video: videoConstraints,
     audio: audioConstraint,
   });
+
+  // Desktop: with Discord running, swap the system audio for a capture that
+  // leaves Discord's voice chat out (no choice to make — it's always off the
+  // stream). Without Discord, or if that capture can't start, the regular
+  // system audio stays.
+  if (window.screenPicker && audioConstraint) {
+    const filtered = await startAppAudio();
+    if (filtered) {
+      stream.getAudioTracks().forEach((t) => { stream.removeTrack(t); t.stop(); });
+      stream.addTrack(filtered);
+      showToast('O som do Discord não vai para a transmissão.');
+    }
+  }
 
   // Tells the encoder to favor smooth frame delivery over per-frame
   // sharpness — the default ('detail') optimizes for static content and

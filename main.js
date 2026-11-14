@@ -1,7 +1,9 @@
 const { app, BrowserWindow, Menu, Tray, session, desktopCapturer, ipcMain, globalShortcut, nativeImage } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
+const { spawn } = require('child_process');
 const path = require('path');
 
 // The app runs next to a game, so it should only ever soak up CPU the game
@@ -50,6 +52,10 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+
+  // A reload or crash drops the page that was reading the PCM.
+  mainWindow.webContents.on('did-start-loading', stopLoopbackHelper);
+  mainWindow.webContents.on('render-process-gone', stopLoopbackHelper);
 
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
     console.error('did-fail-load', errorCode, errorDescription, validatedURL);
@@ -198,7 +204,89 @@ function isSafeHotkey(accel) {
   return parts.some((m) => m === 'Control' || m === 'Alt' || m === 'Super') || /^F\d/.test(key);
 }
 
+// ---- Stream audio without Discord ----
+// Chromium's loopback capture takes everything the default output plays, Discord's
+// voice chat included. When Discord is running, the stream's audio instead comes
+// from a helper that captures "everything except Discord's processes" through the
+// Windows process-loopback API (win-process-loopback.ps1) and hands back raw PCM,
+// which the page turns into the audio track (public/js/appAudio.js). Anything that
+// goes wrong here (old Windows, Discord not running, PowerShell blocked) reports
+// { ok:false } and the page keeps the regular system audio.
+const AUDIO_EXCLUDE_NAMES = process.env.SCRIMA_AUDIO_EXCLUDE || 'Discord,DiscordPTB,DiscordCanary';
+const LOOPBACK_START_TIMEOUT_MS = 15000; // the first run compiles the helper
+const PCM_FRAME_BYTES = 4; // 16-bit stereo
+let loopbackHelper = null;
+
+function stopLoopbackHelper() {
+  const child = loopbackHelper;
+  loopbackHelper = null;
+  if (child) { try { child.kill(); } catch { /* already gone */ } }
+}
+
+// Process loopback exists from Windows 10 2004 (build 19041).
+const supportsProcessLoopback = () => process.platform === 'win32' && Number(os.release().split('.')[2]) >= 19041;
+
+function startLoopbackHelper() {
+  stopLoopbackHelper();
+  if (!supportsProcessLoopback()) return Promise.resolve({ ok: false, reason: 'unsupported' });
+
+  // PowerShell can't read from inside the asar, so the script is copied out; the
+  // compiled helper is cached next to it, both keyed by the script's content.
+  const source = fs.readFileSync(path.join(__dirname, 'win-process-loopback.ps1'), 'utf8');
+  const hash = crypto.createHash('sha1').update(source).digest('hex').slice(0, 8);
+  const dir = app.getPath('userData');
+  const script = path.join(dir, `win-process-loopback-${hash}.ps1`);
+  if (!fs.existsSync(script)) fs.writeFileSync(script, source, 'utf8');
+  const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+
+  return new Promise((resolve) => {
+    // -MTA: the audio client lives in the MTA and has no proxy for a PowerShell STA thread.
+    const child = spawn(powershell, [
+      '-MTA', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script,
+      '-Mode', 'exclude', '-Name', AUDIO_EXCLUDE_NAMES, '-DllPath', path.join(dir, `scrima-loopback-${hash}.dll`),
+    ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    loopbackHelper = child;
+
+    let settled = false;
+    let stderr = '';
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (!result.ok && loopbackHelper === child) stopLoopbackHelper();
+      resolve(result);
+    };
+    const timer = setTimeout(() => settle({ ok: false, reason: 'timeout' }), LOOPBACK_START_TIMEOUT_MS);
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.includes('READY')) return settle({ ok: true });
+      const failure = /ERR:(\S+)/.exec(stderr);
+      if (failure) settle({ ok: false, reason: failure[1] });
+    });
+    // Chunks arrive at arbitrary sizes; the page needs whole stereo frames.
+    let pending = Buffer.alloc(0);
+    child.stdout.on('data', (chunk) => {
+      if (loopbackHelper !== child) return;
+      pending = Buffer.concat([pending, chunk]);
+      const usable = pending.length - (pending.length % PCM_FRAME_BYTES);
+      if (!usable) return;
+      mainWindow?.webContents.send('app-audio:pcm', new Uint8Array(pending.subarray(0, usable)));
+      pending = pending.subarray(usable);
+    });
+    child.stdout.on('error', () => {});
+    child.on('error', () => settle({ ok: false, reason: 'spawn-failed' }));
+    child.on('exit', (code) => {
+      settle({ ok: false, reason: `exit-${code}` });
+      if (loopbackHelper === child) loopbackHelper = null;
+    });
+  });
+}
+
 function registerDesktopIpc() {
+  ipcMain.handle('app-audio:start', () => startLoopbackHelper());
+  ipcMain.handle('app-audio:stop', () => stopLoopbackHelper());
+
   ipcMain.handle('hotkeys:set', (_event, bindings) => {
     registeredHotkeys.forEach((accel) => globalShortcut.unregister(accel));
     registeredHotkeys = [];
@@ -247,7 +335,10 @@ function registerDesktopIpc() {
     }
   });
 
-  app.on('will-quit', () => globalShortcut.unregisterAll());
+  app.on('will-quit', () => {
+    globalShortcut.unregisterAll();
+    stopLoopbackHelper();
+  });
 }
 
 // scrima://invite/<serverId> — opens the app and accepts the server invite.

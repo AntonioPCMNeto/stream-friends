@@ -43,6 +43,18 @@ contextBridge.exposeInMainWorld('desktop', {
   },
 });
 
+// Stream audio without Discord — see startLoopbackHelper() in main.js and
+// public/js/appAudio.js. `start` resolves { ok, reason }; PCM (48 kHz, stereo,
+// 16-bit, whole frames) then arrives through `onPcm` until `stop`.
+contextBridge.exposeInMainWorld('appAudio', {
+  start: () => ipcRenderer.invoke('app-audio:start'),
+  stop: () => ipcRenderer.invoke('app-audio:stop'),
+  onPcm: (callback) => {
+    ipcRenderer.removeAllListeners('app-audio:pcm');
+    ipcRenderer.on('app-audio:pcm', (_event, data) => callback(data));
+  },
+});
+
 // electron-updater bridge — see initUpdater() in main.js. Absent on the web
 // build, which is how public/js/updater.js knows to stay hidden there.
 contextBridge.exposeInMainWorld('updater', {
