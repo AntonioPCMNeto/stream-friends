@@ -1367,4 +1367,17 @@ export async function initLobby(theSocket) {
   identity = await auth.getIdentity();
   applyAuthUX();
   attemptAutoJoin();
+
+  // scrima:// links (desktop only): same path as an ?invite= link — stored as
+  // the pending invite, then applyAuthUX accepts it if signed in, or shows the
+  // "sign in to accept" notice if not.
+  if (window.deepLinks) {
+    const openInvite = (serverId) => {
+      savePendingInvite(String(serverId).slice(0, 100));
+      applyAuthUX();
+    };
+    window.deepLinks.onInvite(openInvite);
+    const launchInvite = await window.deepLinks.take();
+    if (launchInvite) openInvite(launchInvite);
+  }
 }
