@@ -176,6 +176,7 @@ async function captureDisplay() {
   };
 
   let audioConstraint;
+  let pickedSourceId = null;
   if (window.screenPicker) {
     // Electron: run our themed picker first, then request loopback audio
     // only if the user picked it — the handler in main.js must grant it, or
@@ -183,6 +184,7 @@ async function captureDisplay() {
     // constraints".
     const pick = await pickSource();
     if (!pick) return null; // user cancelled — no toast, matches native behavior
+    pickedSourceId = pick.sourceId;
     await window.screenPicker.choose({ sourceId: pick.sourceId, withAudio: pick.audioMode === 'system' });
     audioConstraint = pick.audioMode === 'system' ? audioProcessing : false;
   } else {
@@ -199,11 +201,13 @@ async function captureDisplay() {
   // stream). Without Discord, or if that capture can't start, the regular
   // system audio stays.
   if (window.screenPicker && audioConstraint) {
-    const filtered = await startAppAudio();
+    const filtered = await startAppAudio(pickedSourceId);
     if (filtered) {
       stream.getAudioTracks().forEach((t) => { stream.removeTrack(t); t.stop(); });
-      stream.addTrack(filtered);
-      showToast('O som do Discord não vai para a transmissão.');
+      stream.addTrack(filtered.track);
+      showToast(filtered.mode === 'include'
+        ? 'Só o som do programa da janela vai para a transmissão.'
+        : 'O som do Discord não vai para a transmissão.');
     }
   }
 

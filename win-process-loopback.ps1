@@ -1,6 +1,7 @@
 # Captures one program's audio (or everything except one program) through the
 # Windows process-loopback API (Windows 10 2004+) and writes it to stdout as raw
 # 48 kHz / stereo / 16-bit PCM. Started by main.js; status goes to stderr:
+#   MODE:<mode>    include or exclude, as actually used (it can differ from -Mode)
 #   READY          capture is running
 #   ERR:<reason>   it could not start (main falls back to the system audio)
 # Usage: powershell -File win-process-loopback.ps1 -Mode include|exclude
@@ -191,8 +192,19 @@ try {
   exit 2
 }
 
-if ($TargetPid -le 0 -and $Hwnd -gt 0) { $TargetPid = [ScrimaLoopback]::PidOfWindow($Hwnd) }
-if ($TargetPid -le 0 -and $Name) {
+if ($Mode -eq 'include') {
+  if ($TargetPid -le 0 -and $Hwnd -gt 0) { $TargetPid = [ScrimaLoopback]::PidOfWindow($Hwnd) }
+  $owner = $null
+  if ($TargetPid -gt 0) { $owner = Get-Process -Id $TargetPid -ErrorAction SilentlyContinue }
+  # A window that is gone, or a Store app's window (it belongs to ApplicationFrameHost,
+  # not to the app that makes the sound), cannot be captured as "only this program":
+  # fall back to "everything except -Name". Never look a program up by name in include mode.
+  if (-not $owner -or $owner.ProcessName -eq 'ApplicationFrameHost') {
+    $TargetPid = 0
+    if ($Name) { $Mode = 'exclude' }
+  }
+}
+if ($Mode -eq 'exclude' -and $TargetPid -le 0 -and $Name) {
   # -Name takes one or more comma-separated program names; the first one that is
   # running wins. A program is a tree of helper processes and the API takes the
   # tree's root, so pick the process whose parent is not the same program.
@@ -204,5 +216,6 @@ if ($TargetPid -le 0 -and $Name) {
   }
 }
 if ($TargetPid -le 0) { [Console]::Error.WriteLine('ERR:not-running'); exit 3 }
+[Console]::Error.WriteLine('MODE:' + $Mode)
 
 exit ([ScrimaLoopback]::Run($(if ($Mode -eq 'exclude') { 1 } else { 0 }), [uint32]$TargetPid, $Flags, $Duration))

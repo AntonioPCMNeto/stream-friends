@@ -226,7 +226,7 @@ function stopLoopbackHelper() {
 // Process loopback exists from Windows 10 2004 (build 19041).
 const supportsProcessLoopback = () => process.platform === 'win32' && Number(os.release().split('.')[2]) >= 19041;
 
-function startLoopbackHelper() {
+function startLoopbackHelper(sourceId) {
   stopLoopbackHelper();
   if (!supportsProcessLoopback()) return Promise.resolve({ ok: false, reason: 'unsupported' });
 
@@ -239,11 +239,17 @@ function startLoopbackHelper() {
   if (!fs.existsSync(script)) fs.writeFileSync(script, source, 'utf8');
   const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 
+  // A window share captures only that program's audio (so Discord, mic monitoring
+  // and every other app are left out whatever device they play on); a screen share
+  // has no single program, so it is "everything except Discord".
+  const windowHandle = /^window:(\d+):/.exec(String(sourceId || ''));
+  const target = windowHandle ? ['-Mode', 'include', '-Hwnd', windowHandle[1]] : ['-Mode', 'exclude'];
+
   return new Promise((resolve) => {
     // -MTA: the audio client lives in the MTA and has no proxy for a PowerShell STA thread.
     const child = spawn(powershell, [
       '-MTA', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script,
-      '-Mode', 'exclude', '-Name', AUDIO_EXCLUDE_NAMES, '-DllPath', path.join(dir, `scrima-loopback-${hash}.dll`),
+      ...target, '-Name', AUDIO_EXCLUDE_NAMES, '-DllPath', path.join(dir, `scrima-loopback-${hash}.dll`),
     ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     loopbackHelper = child;
 
@@ -260,7 +266,7 @@ function startLoopbackHelper() {
 
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
-      if (stderr.includes('READY')) return settle({ ok: true });
+      if (stderr.includes('READY')) return settle({ ok: true, mode: /MODE:(\w+)/.exec(stderr)?.[1] || target[1] });
       const failure = /ERR:(\S+)/.exec(stderr);
       if (failure) settle({ ok: false, reason: failure[1] });
     });
@@ -284,7 +290,7 @@ function startLoopbackHelper() {
 }
 
 function registerDesktopIpc() {
-  ipcMain.handle('app-audio:start', () => startLoopbackHelper());
+  ipcMain.handle('app-audio:start', (_event, sourceId) => startLoopbackHelper(sourceId));
   ipcMain.handle('app-audio:stop', () => stopLoopbackHelper());
 
   ipcMain.handle('hotkeys:set', (_event, bindings) => {

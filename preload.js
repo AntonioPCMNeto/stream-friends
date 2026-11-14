@@ -45,9 +45,10 @@ contextBridge.exposeInMainWorld('desktop', {
 
 // Stream audio without Discord — see startLoopbackHelper() in main.js and
 // public/js/appAudio.js. `start` resolves { ok, reason }; PCM (48 kHz, stereo,
-// 16-bit, whole frames) then arrives through `onPcm` until `stop`.
+// 16-bit, whole frames) then arrives through `onPcm` until `stop`. `start` takes
+// the picked source id: a window share captures only that program's audio.
 contextBridge.exposeInMainWorld('appAudio', {
-  start: () => ipcRenderer.invoke('app-audio:start'),
+  start: (sourceId) => ipcRenderer.invoke('app-audio:start', sourceId),
   stop: () => ipcRenderer.invoke('app-audio:stop'),
   onPcm: (callback) => {
     ipcRenderer.removeAllListeners('app-audio:pcm');
