@@ -6,6 +6,9 @@ export const state = {
   screenStream: null,
   webcamStream: null,
   isSharingScreen: false,
+  nativeSize: null, // { width, height } the native helper encodes
+  nativeStats: null, // last 'stats' line from the native helper
+  nativeScreen: false, // the screen video comes from the desktop capture helper (nativeShare.js), not a MediaStreamTrack
   isSharingWebcam: false,
   webcamFacing: 'user', // 'user' | 'environment' — which camera to request (matters on phones)
   videoBitrateKbps: null, // null/0 = auto (browser default, no cap) — screen only

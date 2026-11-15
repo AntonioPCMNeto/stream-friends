@@ -277,6 +277,31 @@ test('livekit-token issues a token scoped to the socket\'s own room and identity
   alice.close();
 });
 
+test('livekit-native-token is a publish-only token for the socket id plus ~screen in its own room', async () => {
+  const alice = await connect();
+  alice.emit('join-room', { roomId: 'native-room', username: 'Alice' });
+  await wait(100);
+
+  const reply = await new Promise((resolve) => alice.emit('livekit-native-token', resolve));
+  assert.strictEqual(reply.enabled, true);
+  assert.strictEqual(reply.url, 'wss://sfu.example.test:8443');
+
+  const claims = await new TokenVerifier(process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET).verify(reply.token);
+  assert.strictEqual(claims.sub, `${alice.id}~screen`);
+  assert.strictEqual(claims.video.room, 'native-room');
+  assert.strictEqual(claims.video.canPublish, true);
+  assert.strictEqual(claims.video.canSubscribe, false);
+
+  alice.close();
+});
+
+test('livekit-native-token is refused for a socket that is not in a room', async () => {
+  const lurker = await connect();
+  const reply = await new Promise((resolve) => lurker.emit('livekit-native-token', resolve));
+  assert.deepStrictEqual(reply, { enabled: false });
+  lurker.close();
+});
+
 test('livekit-token is refused for a socket that is not in a room', async () => {
   const lurker = await connect();
   const reply = await new Promise((resolve) => lurker.emit('livekit-token', resolve));

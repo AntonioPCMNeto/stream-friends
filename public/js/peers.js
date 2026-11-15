@@ -847,6 +847,7 @@ export function initPeerSignaling(theSocket) {
     refreshCaptureThrottle();
   };
   document.addEventListener('visibilitychange', onVisibilityChange);
+  window.addEventListener('focus', onVisibilityChange);
   document.addEventListener('enterpictureinpicture', onVisibilityChange, true);
   document.addEventListener('leavepictureinpicture', onVisibilityChange, true);
 

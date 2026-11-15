@@ -488,6 +488,30 @@ io.on('connection', (socket) => {
     }
   });
 
+  // The desktop app's native capture helper publishes the screen video as its
+  // own LiveKit participant (it is a separate process; reusing the socket's
+  // identity would kick the app's own connection). Identity is the socket id
+  // plus '~screen', which viewers map back to the sharer (sfu.js peerOf). It can
+  // publish into the socket's own room and nothing else, and subscribes to nothing.
+  socket.on('livekit-native-token', async (ack) => {
+    if (typeof ack !== 'function') return;
+    if (rateLimited(socket, 'livekit-native-token', 10, 10000)) return ack({ enabled: false });
+    const { roomId, username } = socket.data;
+    if (!livekitEnabled || !roomId) return ack({ enabled: false });
+    try {
+      const token = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+        identity: `${socket.id}~screen`,
+        name: username,
+        ttl: '6h',
+      });
+      token.addGrant({ room: roomId, roomJoin: true, canPublish: true, canSubscribe: false, canPublishData: false });
+      ack({ enabled: true, url: LIVEKIT_URL, token: await token.toJwt() });
+    } catch (err) {
+      console.error('[livekit-native-token] failed:', err.message);
+      ack({ enabled: false });
+    }
+  });
+
   // A view-only token for a channel the socket is NOT in, so a server member
   // can watch a stream from wherever they are (see sfu.js's startRemoteWatch).
   // Only members of the channel's server get one (canAccessChannel), it can't
