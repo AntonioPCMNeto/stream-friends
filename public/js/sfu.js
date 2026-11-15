@@ -28,7 +28,10 @@ const AUTO_FALLBACK_KBPS = 8000; // capture size unknown
 
 export function autoBitrateKbps(purpose) {
   const stream = purpose === 'webcam' ? state.webcamStream : state.screenStream;
-  const { width, height } = stream?.getVideoTracks()[0]?.getSettings() || {};
+  // A native share's size is what the helper reports; the placeholder track has none.
+  const { width, height } = purpose === 'screen' && state.nativeScreen
+    ? state.nativeSize || {}
+    : stream?.getVideoTracks()[0]?.getSettings() || {};
   const fps = hooks.encodingTarget(purpose).fps || 30;
   if (!width || !height) return AUTO_FALLBACK_KBPS;
   const kbps = AUTO_BASE_KBPS * Math.sqrt((width * height * fps) / AUTO_BASE_PIXELS_PER_SEC);
@@ -81,6 +84,25 @@ function requestToken() {
   });
 }
 
+// The desktop app's native capture helper joins as '<socketId>~screen' (see
+// 'livekit-native-token' in server.js). To everything else it is the same person,
+// so tile keys, hides and watches all go through the sharer's own id.
+const NATIVE_SUFFIX = '~screen';
+const peerOf = (identity) => (identity.endsWith(NATIVE_SUFFIX) ? identity.slice(0, -NATIVE_SUFFIX.length) : identity);
+const participantsOf = (r, peerId) =>
+  [r?.remoteParticipants.get(peerId), r?.remoteParticipants.get(peerId + NATIVE_SUFFIX)].filter(Boolean);
+// Our own helper shows up in our own room too; we never want its video back.
+const isOwnHelper = (r, participant) => participant.identity === `${r.localParticipant?.identity}${NATIVE_SUFFIX}`;
+
+// Token + URL for the native capture helper's own connection, or null when the
+// SFU isn't what this share would use (mesh, or a server without the event).
+export function requestNativeToken() {
+  if (mode !== 'sfu') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    socket.timeout(TOKEN_TIMEOUT_MS).emit('livekit-native-token', (err, reply) => resolve(!err && reply?.enabled ? reply : null));
+  });
+}
+
 function purposeOfSource(source) {
   const { Source } = lk.Track;
   if (source === Source.ScreenShare || source === Source.ScreenShareAudio) return 'screen';
@@ -95,9 +117,13 @@ function wireRoom(r, onDisconnected) {
   // that tiles.js already renders from state.streams. Re-subscribing after a
   // hide hands us a fresh track, so any older one of the same kind goes first.
   r.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+    if (isOwnHelper(r, participant)) {
+      publication.setSubscribed(false);
+      return;
+    }
     const purpose = purposeOfSource(publication.source);
     if (!purpose) return;
-    const key = `${participant.identity}:${purpose}`;
+    const key = `${peerOf(participant.identity)}:${purpose}`;
     let stream = state.streams.get(key);
     if (!stream) {
       stream = new MediaStream();
@@ -114,12 +140,16 @@ function wireRoom(r, onDisconnected) {
   // with the "hidden" cover) stays; only the track goes.
   r.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
     const purpose = purposeOfSource(publication.source);
-    if (purpose) state.streams.get(`${participant.identity}:${purpose}`)?.removeTrack(track.mediaStreamTrack);
+    if (purpose) state.streams.get(`${peerOf(participant.identity)}:${purpose}`)?.removeTrack(track.mediaStreamTrack);
   });
 
   r.on(RoomEvent.TrackPublished, (publication, participant) => {
+    if (isOwnHelper(r, participant)) {
+      publication.setSubscribed(false);
+      return;
+    }
     const purpose = purposeOfSource(publication.source);
-    if (purpose && publication.kind === Track.Kind.Video && unwatched.has(`${participant.identity}:${purpose}`)) {
+    if (purpose && publication.kind === Track.Kind.Video && unwatched.has(`${peerOf(participant.identity)}:${purpose}`)) {
       publication.setSubscribed(false);
     }
   });
@@ -130,11 +160,12 @@ function wireRoom(r, onDisconnected) {
   r.on(RoomEvent.TrackUnpublished, (publication, participant) => {
     const purpose = purposeOfSource(publication.source);
     if (!purpose) return;
-    const stillPublishing = [...participant.trackPublications.values()].some(
+    const peerId = peerOf(participant.identity);
+    const stillPublishing = participantsOf(r, peerId).some((who) => [...who.trackPublications.values()].some(
       (p) => p.trackSid !== publication.trackSid && purposeOfSource(p.source) === purpose
-    );
+    ));
     if (stillPublishing) return;
-    state.streams.delete(`${participant.identity}:${purpose}`);
+    state.streams.delete(`${peerId}:${purpose}`);
     renderTiles();
   });
 
@@ -150,7 +181,7 @@ function wireRoom(r, onDisconnected) {
   r.on(RoomEvent.ParticipantDisconnected, (participant) => {
     let removed = false;
     ['screen', 'webcam'].forEach((purpose) => {
-      removed = state.streams.delete(`${participant.identity}:${purpose}`) || removed;
+      removed = state.streams.delete(`${peerOf(participant.identity)}:${purpose}`) || removed;
     });
     if (removed) renderTiles();
   });
@@ -284,7 +315,9 @@ export async function publishStream(purpose) {
   const pubs = {};
   const [video] = stream.getVideoTracks();
   const [audio] = stream.getAudioTracks();
-  if (video) {
+  // A native share's video comes from the capture helper, so only the audio
+  // (and nothing for the placeholder video track) goes out from here.
+  if (video && !(purpose === 'screen' && state.nativeScreen)) {
     const track = new lk.LocalVideoTrack(video, undefined, true);
     pubs.video = await room.localParticipant.publishTrack(track, videoPublishOptions(purpose));
   }
@@ -315,7 +348,9 @@ export async function replacePublishedStream(purpose, newStream) {
   const [video] = newStream.getVideoTracks();
   const [audio] = newStream.getAudioTracks();
 
-  if (video && pubs.video?.track) await pubs.video.track.replaceTrack(video, { userProvidedTrack: true });
+  if (video && pubs.video?.track && !(purpose === 'screen' && state.nativeScreen)) {
+    await pubs.video.track.replaceTrack(video, { userProvidedTrack: true });
+  }
 
   if (pubs.audio && audio) {
     await pubs.audio.track.replaceTrack(audio, { userProvidedTrack: true });
@@ -341,7 +376,8 @@ export function hasSfuViewers(purpose) {
 }
 
 export function sfuViewerCount() {
-  return room ? room.remoteParticipants.size : 0;
+  if (!room) return 0;
+  return [...room.remoteParticipants.values()].filter((p) => !isOwnHelper(room, p)).length;
 }
 
 // The viewer's per-tile hide / the window-hidden auto-pause. Unsubscribing the
@@ -355,9 +391,9 @@ export function setSfuWatching(peerId, purpose, watching) {
 
 function applySubscription(peerId, purpose, watching) {
   [room, ...[...watchRooms.values()].map((entry) => entry.room)].forEach((r) => {
-    r?.remoteParticipants.get(peerId)?.trackPublications.forEach((pub) => {
+    participantsOf(r, peerId).forEach((who) => who.trackPublications.forEach((pub) => {
       if (pub.kind === lk.Track.Kind.Video && purposeOfSource(pub.source) === purpose) pub.setSubscribed(watching);
-    });
+    }));
   });
 }
 
@@ -386,7 +422,7 @@ async function requestWatchToken(channelId) {
 // and we only want the ones we asked for.
 function subscribeIfWanted(entry, publication, participant) {
   const purpose = purposeOfSource(publication.source);
-  const key = `${participant.identity}:${purpose}`;
+  const key = `${peerOf(participant.identity)}:${purpose}`;
   if (purpose !== 'screen' || !entry.keys.has(key)) return;
   if (publication.kind === lk.Track.Kind.Video && unwatched.has(key)) return;
   publication.setSubscribed(true);
@@ -408,9 +444,9 @@ function openWatchRoom(channelId) {
     r.on(RoomEvent.TrackPublished, (pub, participant) => subscribeIfWanted(entry, pub, participant));
     // The sharer stopping (or leaving) ends the watch, tile and connection.
     r.on(RoomEvent.TrackUnpublished, (pub, participant) => {
-      if (pub.kind === Track.Kind.Video && purposeOfSource(pub.source) === 'screen') stopRemoteWatch(`${participant.identity}:screen`);
+      if (pub.kind === Track.Kind.Video && purposeOfSource(pub.source) === 'screen') stopRemoteWatch(`${peerOf(participant.identity)}:screen`);
     });
-    r.on(RoomEvent.ParticipantDisconnected, (participant) => stopRemoteWatch(`${participant.identity}:screen`));
+    r.on(RoomEvent.ParticipantDisconnected, (participant) => stopRemoteWatch(`${peerOf(participant.identity)}:screen`));
     await r.connect(reply.url, reply.token, { autoSubscribe: false });
     entry.room = r;
     return r;
@@ -441,8 +477,9 @@ export async function startRemoteWatch(channelId, channelName, sharerId, usernam
     return;
   }
   if (!entry.keys.has(key)) return; // stopped while connecting
-  const sharer = entry.room.remoteParticipants.get(sharerId);
-  sharer?.trackPublications.forEach((pub) => subscribeIfWanted(entry, pub, sharer));
+  participantsOf(entry.room, sharerId).forEach((sharer) => {
+    sharer.trackPublications.forEach((pub) => subscribeIfWanted(entry, pub, sharer));
+  });
 
   setTimeout(() => {
     if (!state.remoteWatch.has(key) || state.streams.has(key)) return;
@@ -499,7 +536,7 @@ export async function collectSfuStats() {
       const purpose = purposeOfSource(pub.source);
       const receiver = pub.track?.receiver;
       if (!purpose || pub.kind !== lk.Track.Kind.Video || !receiver) return;
-      tasks.push(receiver.getStats().then((report) => result.inbound.set(`${participant.identity}:${purpose}`, report)).catch(() => {}));
+      tasks.push(receiver.getStats().then((report) => result.inbound.set(`${peerOf(participant.identity)}:${purpose}`, report)).catch(() => {}));
     });
   });
   await Promise.all(tasks);

@@ -31,6 +31,10 @@ jobs:
 
       - run: npm ci
 
+      # The native screen-capture helper (Rust) that ships next to the app; the
+      # Windows runner already has the toolchain and the MSVC build tools.
+      - run: npm run build:native
+
       - run: npm run dist -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -5,6 +5,7 @@ import { showToast } from './toast.js';
 import { refreshParticipants } from './participants.js';
 import { pickSource } from './screenPicker.js';
 import { startAppAudio, stopAppAudio } from './appAudio.js';
+import { startNativeVideo, stopNativeVideo } from './nativeShare.js';
 
 const startBtn = document.getElementById('startShareBtn');
 const switchBtn = document.getElementById('switchSourceBtn');
@@ -103,6 +104,7 @@ export function stopSharing() {
   }
   state.isSharingScreen = false;
   state.screenStream = null;
+  stopNativeVideo();
   stopAppAudio();
   renderTiles();
   setScreenShareUI(false);
@@ -177,12 +179,13 @@ async function captureDisplay() {
 
   let audioConstraint;
   let pickedSourceId = null;
+  let pick = null;
   if (window.screenPicker) {
     // Electron: run our themed picker first, then request loopback audio
     // only if the user picked it — the handler in main.js must grant it, or
     // asking for audio aborts getDisplayMedia with "Invalid capture
     // constraints".
-    const pick = await pickSource();
+    pick = await pickSource();
     if (!pick) return null; // user cancelled — no toast, matches native behavior
     pickedSourceId = pick.sourceId;
     await window.screenPicker.choose({ sourceId: pick.sourceId, withAudio: pick.audioMode === 'system' });
@@ -191,25 +194,18 @@ async function captureDisplay() {
     audioConstraint = audioProcessing;
   }
 
+  // Desktop, on the SFU: the video comes from the native capture helper instead
+  // (null means it can't be used right now, and the regular path below runs).
+  if (window.screenPicker && pick) {
+    const native = await captureNative(pick, framerate, audioConstraint);
+    if (native) return native;
+  }
+
   const stream = await navigator.mediaDevices.getDisplayMedia({
     video: videoConstraints,
     audio: audioConstraint,
   });
-
-  // Desktop: with Discord running, swap the system audio for a capture that
-  // leaves Discord's voice chat out (no choice to make — it's always off the
-  // stream). Without Discord, or if that capture can't start, the regular
-  // system audio stays.
-  if (window.screenPicker && audioConstraint) {
-    const filtered = await startAppAudio(pickedSourceId);
-    if (filtered) {
-      stream.getAudioTracks().forEach((t) => { stream.removeTrack(t); t.stop(); });
-      stream.addTrack(filtered.track);
-      showToast(filtered.mode === 'include'
-        ? 'Só o som do programa da janela vai para a transmissão.'
-        : 'O som do Discord não vai para a transmissão.');
-    }
-  }
+  await useFilteredAppAudio(stream, audioConstraint, pickedSourceId);
 
   // Tells the encoder to favor smooth frame delivery over per-frame
   // sharpness — the default ('detail') optimizes for static content and
@@ -220,6 +216,71 @@ async function captureDisplay() {
   state.videoFramerateFps = framerate;
   return stream;
 }
+
+// Desktop: with Discord running, swap the system audio for a capture that
+// leaves Discord's voice chat out (no choice to make — it's always off the
+// stream). Without Discord, or if that capture can't start, the regular
+// system audio stays.
+async function useFilteredAppAudio(stream, audioConstraint, pickedSourceId) {
+  if (!(window.screenPicker && audioConstraint)) return;
+  const filtered = await startAppAudio(pickedSourceId);
+  if (!filtered) return;
+  stream.getAudioTracks().forEach((t) => { stream.removeTrack(t); t.stop(); });
+  stream.addTrack(filtered.track);
+  showToast(filtered.mode === 'include'
+    ? 'Só o som do programa da janela vai para a transmissão.'
+    : 'O som do Discord não vai para a transmissão.');
+}
+
+// The native-helper variant of a share: the helper captures, encodes and publishes
+// the video; this page only supplies the audio and keeps a stream whose video
+// track is a placeholder. Returns null (nothing started) when it can't be used.
+async function captureNative(pick, framerate, audioConstraint) {
+  const height = resolutionGroup.dataset.value === 'auto' ? 0 : Number(resolutionGroup.dataset.value.split('x')[1]) || 0;
+  const audioTracks = [];
+  const stream = await startNativeVideo({
+    sourceId: pick.sourceId,
+    fps: framerate,
+    height,
+    kbps: state.videoBitrateKbps || 8000,
+    audioTracks,
+    onLost: () => {
+      showToast('A captura de tela nativa parou. Compartilhe a tela de novo.', 'error');
+      stopSharing();
+    },
+  });
+  if (!stream) return null;
+
+  try {
+    if (audioConstraint) {
+      // Loopback audio only comes with a display capture request in Electron, so
+      // ask for a tiny video next to it and drop that video right away.
+      const audioOnly = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 1, width: { ideal: 320 }, height: { ideal: 180 } },
+        audio: audioConstraint,
+      });
+      audioOnly.getVideoTracks().forEach((t) => t.stop());
+      audioOnly.getAudioTracks().forEach((t) => { audioTracks.push(t); stream.addTrack(t); });
+      await useFilteredAppAudio(stream, audioConstraint, pick.sourceId);
+    }
+  } catch (err) {
+    stopNativeVideo();
+    stream.getTracks().forEach((t) => t.stop());
+    throw err;
+  }
+
+  stream.isNative = true;
+  stream.getVideoTracks()[0].contentHint = 'motion';
+  stream.getVideoTracks()[0].onended = () => stopSharing();
+  state.videoFramerateFps = framerate;
+  return stream;
+}
+
+window.addEventListener('native-share-lost', () => {
+  if (!state.nativeScreen) return;
+  showToast('A conexão com o servidor de vídeo mudou. Compartilhe a tela de novo.', 'error');
+  stopSharing();
+});
 
 function reportCaptureError(err, isWebcam = false) {
   console.error(`Failed to capture ${isWebcam ? 'webcam' : 'screen'}:`, err);
@@ -308,13 +369,24 @@ async function switchSource() {
   screenCaptureInFlight = true;
   const previous = state.screenStream;
   try {
+    const wasNative = state.nativeScreen;
     const stream = await captureDisplay();
     if (!stream) return; // picker cancelled — current share untouched
 
-    await replaceOutgoingStream('screen', stream);
-    state.screenStream = stream;
-    renderTiles(); // repoints the local preview
-    refreshCaptureThrottle();
+    if (Boolean(stream.isNative) !== wasNative) {
+      // Going between a native and a regular capture changes who publishes the
+      // video, so this is a fresh publish rather than a track swap.
+      if (wasNative) stopNativeVideo();
+      removeOutgoingTracks('screen');
+      state.screenStream = stream;
+      renderTiles();
+      await startOutgoing('screen');
+    } else {
+      await replaceOutgoingStream('screen', stream);
+      state.screenStream = stream;
+      renderTiles(); // repoints the local preview
+      refreshCaptureThrottle();
+    }
 
     previous.getVideoTracks().forEach((t) => { t.onended = null; });
     previous.getTracks().forEach((t) => t.stop());

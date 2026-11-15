@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, session, desktopCapturer, ipcMain, globalShortcut, nativeImage } = require('electron');
+const { app, BrowserWindow, Menu, Tray, session, desktopCapturer, ipcMain, globalShortcut, nativeImage, screen } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -289,7 +289,104 @@ function startLoopbackHelper(sourceId) {
   });
 }
 
+// ---- Native screen capture ----
+// Chromium's getDisplayMedia path copies every frame off the GPU and re-uploads it
+// to the encoder, which costs a lot of frames on AMD cards next to a game. The
+// helper (native/scrima-capture, Rust) captures with Windows Graphics Capture,
+// converts and H.264-encodes on the GPU, and publishes the result straight to the
+// SFU as its own participant (see 'livekit-native-token' in server.js). It reports
+// as JSON lines on stdout and stops when its stdin closes. If it is missing or
+// fails to start, the page keeps the regular getDisplayMedia share.
+const NATIVE_START_TIMEOUT_MS = 20000;
+let nativeHelper = null;
+
+const nativeHelperPath = () => (app.isPackaged
+  ? path.join(process.resourcesPath, 'native', 'scrima-capture.exe')
+  : path.join(__dirname, 'native', 'scrima-capture', 'target', 'release', 'scrima-capture.exe'));
+
+function stopNativeShare() {
+  const child = nativeHelper;
+  nativeHelper = null;
+  if (!child) return;
+  try { child.stdin.end('stop\n'); } catch { /* already closed */ }
+  setTimeout(() => { try { child.kill(); } catch { /* already gone */ } }, 3000).unref();
+}
+
+// A desktopCapturer id becomes what the helper captures: 'window:<hwnd>:0' is the
+// window itself, 'screen:...' is the monitor of that display (by a point inside it,
+// in physical pixels).
+async function nativeTargetArgs(sourceId) {
+  const windowHandle = /^window:(\d+):/.exec(String(sourceId || ''));
+  if (windowHandle) return ['--hwnd', windowHandle[1]];
+  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
+  const source = sources.find((s) => s.id === sourceId);
+  const display = screen.getAllDisplays().find((d) => String(d.id) === String(source?.display_id)) || screen.getPrimaryDisplay();
+  const { x, y, width, height } = display.bounds;
+  const point = screen.dipToScreenPoint({ x: x + Math.floor(width / 2), y: y + Math.floor(height / 2) });
+  return ['--point', `${Math.round(point.x)},${Math.round(point.y)}`];
+}
+
+function startNativeShare({ url, token, sourceId, fps, kbps, height }) {
+  stopNativeShare();
+  const exe = nativeHelperPath();
+  if (!fs.existsSync(exe)) return Promise.resolve({ ok: false, reason: 'missing' });
+  // The page picks the server; only a TLS WebSocket URL may receive the screen.
+  if (!/^wss:\/\/[^\s]+$/.test(String(url)) || typeof token !== 'string') return Promise.resolve({ ok: false, reason: 'bad-url' });
+  const num = (v, min, max, fallback) => (Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : fallback);
+
+  return nativeTargetArgs(sourceId).then((target) => new Promise((resolve) => {
+    const child = spawn(exe, [
+      'publish', '--url', String(url), '--token', String(token), ...target,
+      '--fps', String(num(fps, 1, 120, 60)), '--kbps', String(num(kbps, 1500, 100000, 8000)), '--height', String(num(height, 0, 4320, 0)),
+    ], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    nativeHelper = child;
+
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (!result.ok && nativeHelper === child) stopNativeShare();
+      resolve(result);
+    };
+    const timer = setTimeout(() => settle({ ok: false, reason: 'timeout' }), NATIVE_START_TIMEOUT_MS);
+
+    let pending = '';
+    child.stdout.on('data', (chunk) => {
+      pending += chunk.toString();
+      let newline;
+      while ((newline = pending.indexOf('\n')) >= 0) {
+        const line = pending.slice(0, newline).trim();
+        pending = pending.slice(newline + 1);
+        let event;
+        try { event = JSON.parse(line); } catch { continue; }
+        if (event.event === 'started') settle({ ok: true, width: event.width, height: event.height, encoder: event.encoder });
+        else if (event.event === 'error') settle({ ok: false, reason: String(event.message || 'error').slice(0, 300) });
+        if (nativeHelper === child) mainWindow?.webContents.send('native-share:event', event);
+      }
+    });
+    child.stdout.on('error', () => {});
+    child.stderr.on('data', () => {});
+    child.stdin.on('error', () => {});
+    child.on('error', () => settle({ ok: false, reason: 'spawn-failed' }));
+    child.on('exit', (code) => {
+      settle({ ok: false, reason: `exit-${code}` });
+      if (nativeHelper === child) {
+        nativeHelper = null;
+        mainWindow?.webContents.send('native-share:event', { event: 'exited', code });
+      }
+    });
+  }), (err) => ({ ok: false, reason: `target: ${err.message}` }));
+}
+
 function registerDesktopIpc() {
+  ipcMain.handle('native-share:available', () => process.platform === 'win32' && fs.existsSync(nativeHelperPath()));
+  ipcMain.handle('native-share:start', (_event, options) => startNativeShare(options || {}));
+  ipcMain.handle('native-share:stop', () => stopNativeShare());
+  ipcMain.handle('native-share:set-bitrate', (_event, kbps) => {
+    if (nativeHelper && Number.isFinite(kbps)) { try { nativeHelper.stdin.write(`kbps ${Math.round(kbps)}\n`); } catch { /* helper is going away */ } }
+  });
+
   ipcMain.handle('app-audio:start', (_event, sourceId) => startLoopbackHelper(sourceId));
   ipcMain.handle('app-audio:stop', () => stopLoopbackHelper());
 
@@ -344,6 +441,7 @@ function registerDesktopIpc() {
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
     stopLoopbackHelper();
+    stopNativeShare();
   });
 }
 

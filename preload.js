@@ -56,6 +56,20 @@ contextBridge.exposeInMainWorld('appAudio', {
   },
 });
 
+// Native screen capture — see startNativeShare() in main.js and
+// public/js/nativeShare.js. Absent on the web build (and a plain getDisplayMedia
+// share is used there).
+contextBridge.exposeInMainWorld('nativeShare', {
+  available: () => ipcRenderer.invoke('native-share:available'),
+  start: (options) => ipcRenderer.invoke('native-share:start', options),
+  stop: () => ipcRenderer.invoke('native-share:stop'),
+  setBitrate: (kbps) => ipcRenderer.invoke('native-share:set-bitrate', kbps),
+  onEvent: (callback) => {
+    ipcRenderer.removeAllListeners('native-share:event');
+    ipcRenderer.on('native-share:event', (_event, payload) => callback(payload));
+  },
+});
+
 // electron-updater bridge — see initUpdater() in main.js. Absent on the web
 // build, which is how public/js/updater.js knows to stay hidden there.
 contextBridge.exposeInMainWorld('updater', {

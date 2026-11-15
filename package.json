@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "build:native": "cargo build --release --manifest-path native/scrima-capture/Cargo.toml",
     "server": "node server.js",
     "server:dev": "nodemon server.js",
     "test": "node --test",
@@ -39,6 +40,12 @@
       "preload.js",
       "win-process-loopback.ps1",
       "public/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "native/scrima-capture/target/release/scrima-capture.exe",
+        "to": "native/scrima-capture.exe"
+      }
     ],
     "artifactName": "${name}-setup-${version}.${ext}",
     "win": {

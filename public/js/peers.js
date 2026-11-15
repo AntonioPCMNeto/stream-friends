@@ -289,6 +289,10 @@ function applyEncodingParams(sender, purpose) {
 // sender for one purpose — used when the user changes a share-panel control
 // while already sharing (screen only; webcam has no such controls).
 export function updateEncodingParams(purpose) {
+  if (purpose === 'screen' && state.nativeScreen) {
+    window.nativeShare?.setBitrate(state.videoBitrateKbps || autoBitrateKbps('screen'));
+    return;
+  }
   if (outgoingVia[purpose] === 'sfu') {
     const sender = getPublishedVideoSender(purpose);
     if (sender) applyEncodingParams(sender, purpose);
@@ -637,6 +641,12 @@ async function pollStats() {
         console.log(`[stream:${purpose}] up: ${outbound.frameWidth}x${outbound.frameHeight} codec=${codecName} encoder=${outbound.encoderImplementation} path=${path?.kind || '?'} viewers=${countConnectionsForPurpose(purpose)}`);
       }
       logStreamDiag(purpose, outbound, codecName, path);
+    } else if (purpose === 'screen' && state.nativeScreen) {
+      stopFrameCounter(purpose);
+      const n = state.nativeStats;
+      if (n && isStatsVisible('local:screen')) {
+        updateTileStats('local:screen', `${state.nativeSize?.width}×${state.nativeSize?.height} · ${n.encoded_fps}fps · ${n.kbps}kbps · H264 · nativo · HW enc`);
+      }
     } else if (localStreamFor(purpose)) {
       // No viewer connected for this purpose — no outbound RTP. Read
       // resolution off the capture track and the live framerate off the
@@ -710,7 +720,15 @@ function sfuCanUseHardwareEncoder() {
 // Sends one of our streams on the transport chosen for it: a single publish to
 // the SFU, or (mesh) an offer to every peer already here.
 async function sendOutgoing(purpose, mode) {
-  const via = mode === 'sfu' && sfuCanUseHardwareEncoder() ? 'sfu' : 'mesh';
+  // A native screen share has no browser-side encoder to vet — its video comes
+  // from the capture helper, which only ever publishes through the SFU. If the
+  // transport is no longer the SFU there is nothing to fall back to mid-share.
+  const native = purpose === 'screen' && state.nativeScreen;
+  if (native && mode !== 'sfu') {
+    window.dispatchEvent(new Event('native-share-lost'));
+    return;
+  }
+  const via = mode === 'sfu' && (native || sfuCanUseHardwareEncoder()) ? 'sfu' : 'mesh';
   outgoingVia[purpose] = via;
   if (via === 'sfu') {
     await publishStream(purpose);
@@ -847,6 +865,7 @@ export function initPeerSignaling(theSocket) {
     refreshCaptureThrottle();
   };
   document.addEventListener('visibilitychange', onVisibilityChange);
+  window.addEventListener('focus', onVisibilityChange);
   document.addEventListener('enterpictureinpicture', onVisibilityChange, true);
   document.addEventListener('leavepictureinpicture', onVisibilityChange, true);
 
