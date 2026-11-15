@@ -14,7 +14,7 @@ pre-encoded track.
   running to see what the machine can actually deliver.
 
 Build: `npm run build:native` (needs Rust and the MSVC C++ build tools). The static CRT in
-`.cargo/config.toml` is required because LiveKit's prebuilt libwebrtc is built with `/MT`. The
+The repo-root `.cargo/config.toml` (cargo reads it from the working directory upward, so it must not live inside the crate) is required because LiveKit's prebuilt libwebrtc is built with `/MT`. The
 installer picks the exe up from `target/release` (see `extraResources` in package.json).
 
 AMD quirk handled in `pipeline.rs`: the encoder sizes frames as if the stream ran at 30 fps, so above
