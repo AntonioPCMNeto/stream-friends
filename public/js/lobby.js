@@ -869,8 +869,9 @@ function buildVoiceChannelRow(channel) {
   name.textContent = channel.name;
   row.appendChild(name);
   const activateRow = () => {
-    // Already in this room (e.g. reading a text channel from it): clicking it
-    // is the way back to its streams, not a rejoin that would drop them.
+    // Like looking into a Discord voice channel: the first click enters the room
+    // (streams, chat, who is there) without opening the mic; clicking the row of
+    // the room you're already in, or the headset button, joins the audio.
     if (state.hasEntered && state.roomId === channel.id) {
       showStreams();
       closeSidebarOnMobile();
@@ -879,7 +880,6 @@ function buildVoiceChannelRow(channel) {
     }
     joinRoom(channel.id, `🔊 ${channel.name}`);
     closeSidebarOnMobile();
-    joinVoice();
   };
   row.addEventListener('click', activateRow);
   row.addEventListener('keydown', (e) => {
