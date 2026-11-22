@@ -198,6 +198,7 @@ unsafe fn run(
     ctl: Arc<Ctl>,
     ready: std::sync::mpsc::Sender<Result<(u32, u32, String)>>,
 ) -> Result<()> {
+    crate::tuning::boost_thread();
     let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
     let _ = RoInitialize(RO_INIT_MULTITHREADED);
     MFStartup(MF_VERSION, MFSTARTUP_FULL)?;
@@ -328,7 +329,6 @@ unsafe fn run(
 
     let attrs = transform.GetAttributes()?;
     attrs.SetUINT32(&MF_TRANSFORM_ASYNC_UNLOCK, 1)?;
-    let _ = attrs.SetUINT32(&MF_LOW_LATENCY, 1);
     transform.ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, mgr.as_raw() as usize)?;
 
     let kbps = cfg.kbps.max(500);
@@ -366,7 +366,9 @@ unsafe fn run(
             eprintln!("codec api {label} rejected: {e}");
         }
     };
-    set(&CODECAPI_AVLowLatencyMode, VARIANT::from(true), "low-latency");
+    // Low-latency mode (and MF_LOW_LATENCY) makes this encoder take one frame at a time with ~30 ms
+    // of round trip: 34 fps at 1080p60. Without it, 2-3 frames are in flight and it holds 60.
+    set(&CODECAPI_AVLowLatencyMode, VARIANT::from(false), "low-latency off");
     // Peak-constrained VBR: this encoder sizes CBR frames as if the stream
     // were 30 fps and overshoots ~2x at 60; VBR with a hard peak holds the cap.
     set(&CODECAPI_AVEncCommonRateControlMode, VARIANT::from(eAVEncCommonRateControlMode_PeakConstrainedVBR.0 as u32), "rate-control");
@@ -396,6 +398,7 @@ unsafe fn run(
         let vp = vp.clone();
         let winrt_box = SendBox(winrt_dev.clone());
         TypedEventHandler::<Direct3D11CaptureFramePool, windows::core::IInspectable>::new(move |p, _| {
+            crate::tuning::boost_thread();
             let Some(p) = p.as_ref() else { return Ok(()) };
             let Ok(frame) = p.TryGetNextFrame() else { return Ok(()) };
             let ts = frame.SystemRelativeTime()?.Duration;

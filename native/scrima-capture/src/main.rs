@@ -1,5 +1,6 @@
 mod pipeline;
 mod publish;
+mod tuning;
 
 use anyhow::{anyhow, Result};
 use pipeline::{Config, Source};
@@ -48,7 +49,7 @@ fn bench(args: HashMap<String, String>) -> Result<()> {
             }
         }),
     )?;
-    println!("{}x{} @ {} fps, {} kbps, encoder: {}", handle.width, handle.height, cfg.fps, cfg.kbps, handle.encoder);
+    println!("{}x{} @ {} fps, {} kbps, encoder: {}, tune: {}", handle.width, handle.height, cfg.fps, cfg.kbps, handle.encoder, tuning::describe(tuning::get()));
     println!("sec  cap  rate-drop  mbox-drop  enc  key  kbps  lat-avg  lat-max");
     let c = &handle.ctl.counters;
     let start = Instant::now();
@@ -87,6 +88,7 @@ fn bench(args: HashMap<String, String>) -> Result<()> {
 
 fn main() -> Result<()> {
     let (cmd, args) = parse_args();
+    tuning::apply_process();
     match cmd.as_str() {
         "bench" => bench(args),
         "publish" => {
